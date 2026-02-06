@@ -4,6 +4,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from typing import Dict
+from schemas.sales_schema import SalesAgentOutput
 
 class SalesAgent:
     def __init__(self):
@@ -59,27 +60,29 @@ def assign_priority(self, deadline: str) -> str:
         return "medium"
 
 
-def process_rfp(self, file_path: str, extracted_text: str) -> Dict:
+def process_rfp(self, file_path: str, extracted_text: str) -> dict:
     self.validate_file(file_path)
 
-    rfp_id = self.generate_rfp_id()
-    deadline = self.extract_deadline(extracted_text)
-    scope = self.extract_scope(extracted_text)
-    priority = self.assign_priority(deadline)
-
-    return {
-        "rfp_id": rfp_id,
-        "deadline": deadline,
-        "scope_summary": scope,
-        "priority": priority
+    raw_output = {
+        "rfp_id": self.generate_rfp_id(),
+        "deadline": self.extract_deadline(extracted_text),
+        "scope_summary": self.extract_scope(extracted_text),
+        "priority": self.assign_priority(
+            self.extract_deadline(extracted_text)
+        )
     }
 
+    validated = SalesAgentOutput.validate_output(raw_output)
+    return validated.dict()
+
 if __name__ == "__main__":
+    from pprint import pprint
+
     agent = SalesAgent()
     dummy_text = """
-    This RFP is issued for supply of electrical cables.
-    Submission deadline: 15 February 2026
+    RFP for electrical cable supply.
+    Deadline: 15 February 2026
     """
 
-    result = agent.process_rfp("sample.pdf", dummy_text)
-    print(result)
+    output = agent.process_rfp("sample.pdf", dummy_text)
+    pprint(output)
