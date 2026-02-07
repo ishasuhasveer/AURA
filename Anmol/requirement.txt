@@ -1,0 +1,7 @@
+pdfplumber
+pypdf
+spacy
+langchain
+sentence-transformers
+regex
+pandas
