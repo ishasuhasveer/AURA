@@ -5,3 +5,10 @@ langchain
 pydantic
 python-multipart
 pandas
+pdfplumber
+pypdf
+spacy
+langchain
+sentence-transformers
+regex
+pandas

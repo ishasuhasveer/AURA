@@ -1,4 +1,4 @@
-from document_intelligence.pdf_parser import extract_text_from_pdf
+from backend.technical.datasheets.pdf_parser import extract_text_from_pdf
 from decision_intelligence.datasheet_extractor import extract_sku_from_text
 from decision_intelligence.normalization import normalize_sku
 
