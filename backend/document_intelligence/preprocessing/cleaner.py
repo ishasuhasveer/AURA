@@ -52,7 +52,7 @@ if __name__ == "__main__":
     )
 
     # Absolute path to sample PDF
-    pdf_path = os.path.join(PROJECT_ROOT, "data", "sample_rfp.pdf")
+    pdf_path = os.path.join(PROJECT_ROOT, "data", "rfps", "sample_rfp.pdf")
 
     print("Looking for PDF at:", pdf_path)
     print("PDF exists:", os.path.exists(pdf_path))

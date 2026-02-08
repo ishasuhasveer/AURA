@@ -69,7 +69,7 @@ if __name__ == "__main__":
         os.path.join(os.path.dirname(__file__), "..", "..", "..")
     )
 
-    pdf_path = os.path.join(PROJECT_ROOT, "data", "sample_rfp.pdf")
+    pdf_path = os.path.join(PROJECT_ROOT, "data", "rfps","sample_rfp.pdf")
 
     pages = load_pdf(pdf_path)
     cleaned_pages = clean_pages(pages)

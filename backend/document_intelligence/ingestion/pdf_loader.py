@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     print("Computed project root:", PROJECT_ROOT)
 
-    sample_pdf_path = os.path.join(PROJECT_ROOT, "data", "sample_rfp.pdf")
+    sample_pdf_path = os.path.join(PROJECT_ROOT, "data", "rfps", "sample_rfp.pdf")
 
     print("Looking for PDF at:", sample_pdf_path)
     print("PDF exists:", os.path.exists(sample_pdf_path))
