@@ -1,6 +1,13 @@
 from typing import TypedDict, Dict, Any
 from langgraph.graph import StateGraph, END
+
+# Agents
 from backend.agents.sales_agent import SalesAgent
+from backend.agents.pricing_agent import PricingAgent
+
+# External pipelines
+from backend.document_intelligence.rfp_parser import parse_rfp
+from backend.agents.technical_agent import run_technical_agent
 
 
 class RFPState(TypedDict):
@@ -12,8 +19,13 @@ class RFPState(TypedDict):
     technical: Dict[str, Any]
     pricing: Dict[str, Any]
 
+
+# ----------------------------
+# SALES NODE
+# ----------------------------
 def sales_node(state: RFPState) -> RFPState:
     agent = SalesAgent()
+
     sales_output = agent.process_rfp(
         state["file_path"],
         state["extracted_text"]
@@ -23,28 +35,54 @@ def sales_node(state: RFPState) -> RFPState:
     return state
 
 
+# ----------------------------
+# NLP NODE (ANMOL PIPELINE)
+# ----------------------------
 def nlp_node(state: RFPState) -> RFPState:
-    state["nlp"] = {
-        "technical_requirements": [],
-        "quantities": {},
-        "testing_requirements": []
-    }
+
+    rfp_json = parse_rfp(state["file_path"])
+
+    state["nlp"] = rfp_json
+
     return state
 
+
+# ----------------------------
+# TECHNICAL NODE (ISHA LOGIC)
+# ----------------------------
 def technical_node(state: RFPState) -> RFPState:
-    state["technical"] = {
-        "recommended_skus": [],
-        "spec_match_scores": {}
-    }
+
+    technical_output = run_technical_agent(state["nlp"])
+
+    state["technical"] = technical_output
+
     return state
 
+
+# ----------------------------
+# PRICING NODE (BHARGAV)
+# ----------------------------
 def pricing_node(state: RFPState) -> RFPState:
-    state["pricing"] = {
-        "total_estimated_cost": 0
-    }
+
+    pricing_agent = PricingAgent()
+
+    quantities = state["nlp"].get("quantities", {})
+
+    pricing_output = pricing_agent.run(
+        technical_output=state["technical"],
+        quantities=quantities
+    )
+
+    state["pricing"] = pricing_output
+
     return state
 
+
+# ----------------------------
+# GRAPH BUILDER
+# ----------------------------
 def build_rfp_graph():
+
     graph = StateGraph(RFPState)
 
     graph.add_node("sales", sales_node)
@@ -61,7 +99,12 @@ def build_rfp_graph():
 
     return graph.compile()
 
+
+# ----------------------------
+# LOCAL TEST
+# ----------------------------
 if __name__ == "__main__":
+
     graph = build_rfp_graph()
 
     initial_state: RFPState = {
@@ -77,4 +120,6 @@ if __name__ == "__main__":
     }
 
     final_state = graph.invoke(initial_state)
+
+    print("\nFINAL STATE:\n")
     print(final_state)

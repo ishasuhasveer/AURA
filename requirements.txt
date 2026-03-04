@@ -1,14 +1,49 @@
+# -------------------------------
+# Backend API
+# -------------------------------
 fastapi
-uvicorn
-langgraph
-langchain
-pydantic
+uvicorn[standard]
 python-multipart
-pandas
-pdfplumber
-pypdf
+
+# -------------------------------
+# Agentic Workflow
+# -------------------------------
+langgraph
+
+# -------------------------------
+# Document Intelligence
+# -------------------------------
 spacy
+pypdf
+
+# LangChain splitters used in chunking
 langchain
-sentence-transformers
-regex
+langchain-text-splitters
+
+# -------------------------------
+# Data Processing
+# -------------------------------
 pandas
+numpy
+
+# -------------------------------
+# Technical Intelligence (Embeddings)
+# -------------------------------
+sentence-transformers
+faiss-cpu
+
+# -------------------------------
+# Pricing Engine
+# -------------------------------
+openpyxl
+
+# -------------------------------
+# UI + API Communication
+# -------------------------------
+streamlit
+requests
+
+# -------------------------------
+# Validation / Schemas
+# -------------------------------
+pydantic
