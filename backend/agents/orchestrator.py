@@ -9,15 +9,18 @@ class MainOrchestrator:
         log("Initializing LangGraph workflow")
         self.graph = build_rfp_graph()
 
-    def start_workflow(self, file_path: str, extracted_text: str) -> Dict[str, Any]:
+        if self.graph is None:
+            raise RuntimeError("LangGraph workflow initialization failed")
 
-        log("Starting RFP workflow")
+    def start_workflow(self, file_name: str, rfp_data: Dict[str, Any]) -> Dict[str, Any]:
 
+        log(f"Starting RFP workflow for {file_name}")
+
+        # 🔥 FIX: use structured rfp_data directly
         initial_state = {
-            "file_path": file_path,
-            "extracted_text": extracted_text,
+            "file_name": file_name,
+            "rfp_data": rfp_data,
             "sales": {},
-            "nlp": {},
             "technical": {},
             "pricing": {}
         }
@@ -30,7 +33,7 @@ class MainOrchestrator:
             return self.aggregate_results(final_state)
 
         except Exception as e:
-            log(f"Workflow failed: {str(e)}")
+            log(f"Workflow failed: {type(e).__name__}: {str(e)}")
             raise RuntimeError(f"RFP processing failed: {str(e)}")
 
     def aggregate_results(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -40,6 +43,6 @@ class MainOrchestrator:
 
         return {
             "rfp_summary": state.get("sales", {}),
-            "technical_summary": state.get("technical", {}),
-            "pricing_summary": state.get("pricing", {})
+            "technical_results": state.get("technical", {}),
+            "pricing_results": state.get("pricing", {})
         }

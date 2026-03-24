@@ -1,4 +1,4 @@
-from decision_intelligence.spec_matching.spec_matcher import compute_spec_match
+from backend.technical.matching.spec_match import compute_spec_match
 
 
 def test_spec_match_engine():

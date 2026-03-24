@@ -1,5 +1,5 @@
-from decision_intelligence.spec_matching.sku_ranker import rank_skus_by_spec_match
-from decision_intelligence.spec_matching.explanation_table import build_explainability_table
+from backend.technical.matching.ranking import rank_skus_by_spec_match
+from backend.technical.explainability.comparison_table import build_explainability_table
 
 
 def main():

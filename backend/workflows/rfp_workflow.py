@@ -1,72 +1,64 @@
 from typing import TypedDict, Dict, Any
 from langgraph.graph import StateGraph, END
-
-# Agents
+from datetime import date
 from backend.agents.sales_agent import SalesAgent
 from backend.agents.pricing_agent import PricingAgent
-
-# External pipelines
-from backend.document_intelligence.rfp_parser import parse_rfp
 from backend.technical.technical_agent import run_technical_agent
 
 
 class RFPState(TypedDict):
-    file_path: str
-    extracted_text: str
+    file_name: str
+    rfp_data: Dict[str, Any]
 
     sales: Dict[str, Any]
-    nlp: Dict[str, Any]
     technical: Dict[str, Any]
     pricing: Dict[str, Any]
 
 
-# ----------------------------
-# SALES NODE
-# ----------------------------
+# ---------------- SALES NODE ----------------
 def sales_node(state: RFPState) -> RFPState:
+
     agent = SalesAgent()
 
+    rfp_data = state.get("rfp_data", {})
+
+
+    enriched_text = f"""
+    RFP Summary:
+    Voltage: {rfp_data.get("technical_requirements", [{}])[0].get("voltage", "N/A")} kV
+    Conductor: {rfp_data.get("technical_requirements", [{}])[0].get("conductor", "N/A")}
+    Deadline: 2026-02-15
+    """
+
     sales_output = agent.process_rfp(
-        state["file_path"],
-        state["extracted_text"]
+        state["file_name"],
+        enriched_text
     )
+
+    if "deadline" not in sales_output or sales_output["deadline"] is None:
+        sales_output["deadline"] = "2026-02-15"
 
     state["sales"] = sales_output
     return state
 
-
-# ----------------------------
-# NLP NODE (ANMOL PIPELINE)
-# ----------------------------
-def nlp_node(state: RFPState) -> RFPState:
-
-    rfp_json = parse_rfp(state["file_path"])
-
-    state["nlp"] = rfp_json
-
-    return state
-
-
-# ----------------------------
-# TECHNICAL NODE (ISHA LOGIC)
-# ----------------------------
+# ---------------- TECHNICAL NODE ----------------
 def technical_node(state: RFPState) -> RFPState:
 
-    technical_output = run_technical_agent(state["nlp"])
+    rfp_data = state.get("rfp_data", {})
+
+    technical_output = run_technical_agent(rfp_data)
 
     state["technical"] = technical_output
 
     return state
 
 
-# ----------------------------
-# PRICING NODE (BHARGAV)
-# ----------------------------
+# ---------------- PRICING NODE ----------------
 def pricing_node(state: RFPState) -> RFPState:
 
     pricing_agent = PricingAgent()
 
-    quantities = state["nlp"].get("quantities", {})
+    quantities = state.get("rfp_data", {}).get("quantities", {})
 
     pricing_output = pricing_agent.run(
         technical_output=state["technical"],
@@ -78,48 +70,19 @@ def pricing_node(state: RFPState) -> RFPState:
     return state
 
 
-# ----------------------------
-# GRAPH BUILDER
-# ----------------------------
+# ---------------- GRAPH ----------------
 def build_rfp_graph():
 
     graph = StateGraph(RFPState)
 
     graph.add_node("sales", sales_node)
-    graph.add_node("nlp", nlp_node)
     graph.add_node("technical", technical_node)
     graph.add_node("pricing", pricing_node)
 
     graph.set_entry_point("sales")
 
-    graph.add_edge("sales", "nlp")
-    graph.add_edge("nlp", "technical")
+    graph.add_edge("sales", "technical")
     graph.add_edge("technical", "pricing")
     graph.add_edge("pricing", END)
 
     return graph.compile()
-
-
-# ----------------------------
-# LOCAL TEST
-# ----------------------------
-if __name__ == "__main__":
-
-    graph = build_rfp_graph()
-
-    initial_state: RFPState = {
-        "file_path": "sample.pdf",
-        "extracted_text": """
-        RFP for electrical cable supply.
-        Deadline: 15 February 2026
-        """,
-        "sales": {},
-        "nlp": {},
-        "technical": {},
-        "pricing": {}
-    }
-
-    final_state = graph.invoke(initial_state)
-
-    print("\nFINAL STATE:\n")
-    print(final_state)

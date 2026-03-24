@@ -1,4 +1,4 @@
-from decision_intelligence.spec_matching.comparators import (
+from backend.technical.matching.similarity import (
     exact_match,
     numeric_match
 )
@@ -67,7 +67,7 @@ def compute_spec_match(rfp_spec: dict, sku: dict):
             "category": "optional",
             "rfp_value": rfp_value,
             "sku_value": sku_value,
-            "score": score
+            "score": score == 1
         })
 
     # --------------------------------------------------

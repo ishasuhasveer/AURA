@@ -1,4 +1,4 @@
-from decision_intelligence.spec_matching.explanation_table import (
+from backend.technical.explainability.comparison_table import (
     build_explainability_table
 )
 

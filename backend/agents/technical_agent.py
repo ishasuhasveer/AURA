@@ -1,4 +1,4 @@
-from decision_intelligence.technical_agent import TechnicalAgent
+from backend.technical.technical_agent import TechnicalAgent
 
 
 def run_technical_agent(rfp_spec: dict, skus: list) -> dict:
