@@ -1,64 +1,83 @@
-from decision_intelligence.technical_agent import TechnicalAgent
+# backend/technical/demo_technical_agent.py
+
+from backend.technical.technical_agent import TechnicalAgent
 
 
-def main():
-    # ---------------- RFP ----------------
+def run_technical_agent(rfp_data: dict) -> dict:
+    """
+    Entry point used by orchestrator.
+
+    Input:
+        rfp_data (from parser)
+
+    Output:
+        JSON-safe technical evaluation results
+    """
+
+    # ---------------- EXTRACT RFP REQUIREMENTS ----------------
+    tech_req = rfp_data.get("technical_requirements", {})
+
     rfp_spec = {
-        "rfp_id": "RFP_2024_001",
-        "voltage": "400 kV",
-        "conductor": "COPPER",
-        "insulation": "XLPE",
-        "standard": "IEC 60502",
-        "attributes": {
-            "cross_section_mm2": 50,
-            "armouring": "Armoured",
-            "core_count": None
-        }
+        "voltage": tech_req.get("voltage"),
+        "conductor": tech_req.get("conductor"),
+        "standard": tech_req.get("standard"),
     }
 
-    # ---------------- SKUs ----------------
+    # ---------------- SAMPLE SKU DATABASE (for demo) ----------------
     skus = [
         {
             "sku_id": "SKU_001",
-            "voltage": "400 kV",
-            "conductor": "COPPER",
-            "insulation": "XLPE",
-            "standard": "IEC 60502",
-            "attributes": {
-                "cross_section_mm2": 50,
-                "armouring": "Unarmoured",
-                "core_count": None
-            }
+            "voltage": "11kV",
+            "conductor": "copper",
+            "standard": "IEC",
         },
         {
             "sku_id": "SKU_002",
-            "voltage": "400 kV",
-            "conductor": "ALUMINIUM",
-            "insulation": "XLPE",
-            "standard": "IEC 60502",
-            "attributes": {
-                "cross_section_mm2": 70,
-                "armouring": "Armoured",
-                "core_count": None
-            }
+            "voltage": "33kV",
+            "conductor": "aluminium",
+            "standard": "IEC",
         }
     ]
 
-    # ---------------- AGENT ----------------
+    # ---------------- RUN TECHNICAL AGENT ----------------
     agent = TechnicalAgent(top_k=2)
+
     results = agent.evaluate(rfp_spec, skus)
 
-    # ---------------- OUTPUT ----------------
-    print("\n========= TECHNICAL AGENT OUTPUT =========\n")
+    # ---------------- FORMAT OUTPUT (IMPORTANT) ----------------
+    formatted_results = []
 
-    for idx, res in enumerate(results, start=1):
-        print(f"Rank #{idx}")
-        print(f"SKU ID       : {res['sku_id']}")
-        print(f"Spec Match % : {res['spec_match_percent']}%")
-        print("\nCompliance Table:")
-        print(res["compliance_table"].to_string(index=False))
-        print("\n" + "-" * 60 + "\n")
+    for res in results:
+        formatted_results.append({
+            "sku_id": res["sku_id"],
+            "spec_match_percent": res["spec_match_percent"],
+            "compliance_table": res["compliance_table"].to_dict(orient="records")
+        })
+
+    return {
+        "recommended_skus": formatted_results
+    }
 
 
+# -------------------------------
+# MANUAL TEST
+# -------------------------------
 if __name__ == "__main__":
-    main()
+
+    # Simulating parser output
+    sample_rfp_data = {
+        "rfp_id": "RFP_001",
+        "technical_requirements": {
+            "voltage": "11kV",
+            "conductor": "copper",
+            "standard": "IEC"
+        },
+        "quantities": {
+            "estimated_quantity": 100
+        }
+    }
+
+    result = run_technical_agent(sample_rfp_data)
+
+    import json
+    print(json.dumps(result, indent=4))

@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import altair as alt
 
 
 # -------------------------------
@@ -23,17 +24,17 @@ st.caption(
 
 st.markdown("---")
 
-
 # -------------------------------
 # Backend Configuration
 # -------------------------------
-BACKEND_URL = "http://127.0.0.1:8000/process-rfp"
+BACKEND_URL = "http://localhost:8000/process-rfp"
 
 
 # -------------------------------
 # Sidebar
 # -------------------------------
 with st.sidebar:
+
     st.header("🧠 System Overview")
 
     st.markdown(
@@ -41,17 +42,23 @@ with st.sidebar:
         **AURA** simulates how an industrial OEM responds to B2B RFPs.
 
         **Agentic Workflow**
-        - Sales Agent → Qualification
-        - Document Intelligence → RFP Parsing
-        - Technical Agent → SKU Matching
-        - Pricing Agent → Cost Estimation
+        - Sales Agent → Qualification  
+        - Document Intelligence → RFP Parsing  
+        - Technical Agent → SKU Matching  
+        - Pricing Agent → Cost Estimation  
 
         **Tech Stack**
-        - FastAPI
-        - LangGraph
-        - Streamlit
+        - FastAPI  
+        - LangGraph  
+        - Streamlit  
         """
     )
+
+    st.markdown("---")
+
+    if st.button("🔄 Reset Analysis"):
+        st.session_state.clear()
+        st.rerun()
 
 
 # -------------------------------
@@ -85,6 +92,7 @@ if uploaded_file is not None:
             }
 
             try:
+
                 response = requests.post(
                     BACKEND_URL,
                     files=files,
@@ -92,24 +100,29 @@ if uploaded_file is not None:
                 )
 
                 if response.status_code != 200:
+
                     st.error("❌ Backend Error")
                     st.code(response.text)
 
                 else:
+
                     data = response.json()
                     st.session_state["rfp_result"] = data
                     st.success("✅ RFP processed successfully!")
 
             except requests.exceptions.ConnectionError:
+
                 st.error(
                     "❌ Could not connect to backend.\n\n"
                     "Make sure FastAPI is running on port 8000."
                 )
 
             except requests.exceptions.Timeout:
+
                 st.error("❌ Backend request timed out.")
 
             except Exception as e:
+
                 st.error(f"❌ Unexpected error: {e}")
 
 
@@ -121,89 +134,176 @@ if "rfp_result" in st.session_state:
     data = st.session_state["rfp_result"]
 
     st.markdown("---")
-    st.header("📊 RFP Analysis Results")
-
-
-    # ===============================
-    # SALES SUMMARY
-    # ===============================
-    st.subheader("🧾 Sales Agent — RFP Qualification")
+    st.header("📊 RFP Analysis Dashboard")
 
     sales = data.get("rfp_summary", {})
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("RFP ID", sales.get("rfp_id", "-"))
-    col2.metric("Deadline", sales.get("deadline", "-"))
-    col3.metric("Priority", sales.get("priority", "-"))
-    col4.metric("Scope", sales.get("scope_summary", "-"))
-
-
-    # ===============================
-    # TECHNICAL OUTPUT
-    # ===============================
-    st.markdown("---")
-    st.subheader("🛠️ Technical Agent — SKU Recommendations")
-
     technical = data.get("technical_summary", {})
+    pricing = data.get("pricing_summary", {})
 
-    recommended_skus = technical.get("recommended_skus", [])
+    recommended_skus_data = technical.get("recommended_skus", [])
 
-    if recommended_skus:
+    # Extract only SKU IDs for UI
+    recommended_skus = [
+        sku["sku_id"] if isinstance(sku, dict) else sku
+        for sku in recommended_skus_data
+    ]
+    spec_scores = {
+        sku["sku_id"]: sku.get("spec_match_percent", 0)
+        for sku in recommended_skus_data
+    }
+    pricing_details = pricing.get("pricing_details", [])
 
-        df = pd.DataFrame({
-            "Recommended SKU": recommended_skus
-        })
+    total_cost = pricing.get("total_estimated_cost", 0)
 
-        st.dataframe(df, use_container_width=True)
+    # -------------------------------
+    # Tabs Layout
+    # -------------------------------
+    tab1, tab2, tab3, tab4 = st.tabs(
+        [
+            "📊 Overview",
+            "🛠 Technical Analysis",
+            "💰 Pricing Insights",
+            "⚙️ Agent Workflow"
+        ]
+    )
 
-    else:
+    # ===============================
+    # OVERVIEW TAB
+    # ===============================
+    with tab1:
+
+        st.subheader("📄 RFP Summary")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("RFP ID", sales.get("rfp_id", "-"))
+        col2.metric("Deadline", sales.get("deadline", "-"))
+        col3.metric("Priority", sales.get("priority", "-"))
+
+        st.markdown("### Scope Summary")
 
         st.info(
-            "No SKU recommendations available."
+            sales.get("scope_summary", "No scope summary available.")
+        )
+
+        st.markdown("### Estimated Bid Value")
+
+        st.metric(
+            "Total Estimated Cost",
+            f"₹ {total_cost:,.0f}"
         )
 
 
     # ===============================
-    # PRICING OUTPUT
+    # TECHNICAL TAB
     # ===============================
-    st.markdown("---")
-    st.subheader("💰 Pricing Agent — Cost Breakdown")
+    with tab2:
 
-    pricing = data.get("pricing_summary", {})
+        st.subheader("🛠 SKU Recommendations")
 
-    sku_costs = pricing.get("sku_costs", {})
+        if recommended_skus:
 
-    if sku_costs:
-
-        pricing_rows = []
-
-        for sku, details in sku_costs.items():
-
-            pricing_rows.append({
-                "SKU": sku,
-                "Unit Price": details["unit_price"],
-                "Quantity": details["quantity"],
-                "Total Cost": details["total"]
+            df = pd.DataFrame({
+                "Recommended SKU": recommended_skus
             })
 
-        pricing_df = pd.DataFrame(pricing_rows)
+            st.dataframe(df, use_container_width=True)
 
-        st.dataframe(pricing_df, use_container_width=True)
+            # -----------------------
+            # Spec Match Chart
+            # -----------------------
+            if spec_scores:
 
-    else:
-        st.info("No pricing data available.")
+                st.markdown("### Spec Match Comparison")
+
+                chart_df = pd.DataFrame({
+                    "SKU": list(spec_scores.keys()),
+                    "Spec Match %": list(spec_scores.values())
+                })
+
+                chart = alt.Chart(chart_df).mark_bar().encode(
+                    x="SKU",
+                    y="Spec Match %",
+                    tooltip=["SKU", "Spec Match %"]
+                ).properties(height=350)
+
+                st.altair_chart(chart, use_container_width=True)
+
+            # -----------------------
+            # Interactive SKU Viewer
+            # -----------------------
+            selected_sku = st.selectbox(
+                "Inspect SKU",
+                recommended_skus
+            )
+
+            if selected_sku:
+                score = spec_scores.get(selected_sku, "N/A")
+
+                st.info(
+                    f"SKU: {selected_sku} | Spec Match: {score}%"
+                )
+
+        else:
+
+            st.info("No SKU recommendations available.")
 
 
     # ===============================
-    # TOTAL COST
+    # PRICING TAB
     # ===============================
-    total_cost = pricing.get("total_estimated_cost", 0)
+    with tab3:
 
-    st.metric(
-        "Total Estimated Cost",
-        f"₹ {total_cost}"
-    )
+        st.subheader("💰 Pricing Breakdown")
+
+        if pricing_details:
+
+            pricing_rows = []
+
+            for item in pricing_details:
+                pricing_rows.append({
+                    "SKU": item.get("sku_id"),
+                    "Unit Price": item.get("unit_price", 0),
+                    "Quantity": item.get("quantity", 0),
+                    "Total Cost": item.get("total_price", 0)
+                })
+            pricing_df = pd.DataFrame(pricing_rows)
+
+            st.dataframe(pricing_df, use_container_width=True)
+
+            st.markdown("### Cost Comparison")
+
+            chart = alt.Chart(pricing_df).mark_bar().encode(
+                x="SKU",
+                y="Total Cost",
+                tooltip=["SKU", "Total Cost"]
+            ).properties(height=350)
+
+            st.altair_chart(chart, use_container_width=True)
+
+        else:
+
+            st.info("No pricing data available.")
+
+
+    # ===============================
+    # AGENT WORKFLOW TAB
+    # ===============================
+    with tab4:
+
+        st.subheader("⚙️ Agent Execution Pipeline")
+
+        workflow = [
+            ("Sales Agent", "RFP Qualification"),
+            ("Document Intelligence", "Requirement Extraction"),
+            ("Technical Agent", "SKU Matching"),
+            ("Pricing Agent", "Cost Estimation"),
+            ("Main Orchestrator", "Response Consolidation")
+        ]
+
+        for agent, task in workflow:
+
+            st.success(f"{agent} → {task}")
 
 
 # -------------------------------

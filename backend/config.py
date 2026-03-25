@@ -1,2 +1,16 @@
-def log(message: str):
-    print(f"[AURA] {message}")
+import logging
+
+def setup_logger():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[AURA] %(asctime)s | %(levelname)s | %(message)s'
+    )
+    return logging.getLogger("AURA")
+
+logger = setup_logger()
+
+def log(message):
+    logger.info(message)
+
+def log_error(message):
+    logger.error(message)

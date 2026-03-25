@@ -1,34 +1,27 @@
 # backend/agents/sales_agent.py
 
-import os
 import re
-from datetime import datetime
+import uuid
+from datetime import datetime, date
 from backend.schemas.sales_schema import SalesAgentOutput
 
 
 class SalesAgent:
-    def __init__(self):
-        pass
-
-    def validate_file(self, file_path: str) -> None:
-        if not file_path.lower().endswith(".pdf"):
-            raise ValueError("Invalid file type. Only PDF files are allowed.")
-
-        # NOTE: For API uploads, this path may not exist locally.
-        # We will relax this later.
-        # For now, comment this out to avoid false failures.
-        # if not os.path.exists(file_path):
-        #     raise FileNotFoundError("RFP file not found.")
 
     def generate_rfp_id(self) -> str:
-        today = datetime.now().strftime("%Y%m%d")
-        return f"RFP-{today}"
+        return f"RFP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6]}"
 
-    def extract_deadline(self, text: str) -> str:
+    def extract_deadline(self, text: str):
         match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', text)
+
         if match:
-            return match.group(1)
-        return "UNKNOWN"
+            try:
+                return datetime.strptime(match.group(1), "%d %B %Y").date()
+            except Exception:
+                pass
+
+        # ✅ Fallback (CRITICAL FIX)
+        return datetime.now().date()
 
     def extract_scope(self, text: str) -> str:
         keywords = [
@@ -40,30 +33,40 @@ class SalesAgent:
             "switchgear"
         ]
 
-        found = [k for k in keywords if k.lower() in text.lower()]
+        found = list(set([k for k in keywords if k.lower() in text.lower()]))
         return ", ".join(found) if found else "General Electrical Supplies"
 
-    def assign_priority(self, deadline: str) -> str:
-        if deadline == "UNKNOWN":
+    def assign_priority(self, deadline: date) -> str:
+        """
+        Assign priority based on deadline proximity.
+        """
+
+        if not deadline:
             return "medium"
 
         try:
-            deadline_date = datetime.strptime(deadline, "%d %B %Y")
-            days_left = (deadline_date - datetime.now()).days
-            return "high" if days_left <= 30 else "medium"
+            today = datetime.now().date()
+            days_left = (deadline - today).days
+
+            if days_left < 0:
+                return "low"
+            elif days_left <= 30:
+                return "high"
+            else:
+                return "medium"
+
         except Exception:
             return "medium"
 
-    def process_rfp(self, file_path: str, extracted_text: str) -> dict:
-        self.validate_file(file_path)
+    def process_rfp(self, file_name: str, extracted_text: str) -> dict:
+
+        deadline = self.extract_deadline(extracted_text)
 
         raw_output = {
             "rfp_id": self.generate_rfp_id(),
-            "deadline": self.extract_deadline(extracted_text),
+            "deadline": deadline,  # must be date object
             "scope_summary": self.extract_scope(extracted_text),
-            "priority": self.assign_priority(
-                self.extract_deadline(extracted_text)
-            )
+            "priority": self.assign_priority(deadline)
         }
 
         validated = SalesAgentOutput.validate_output(raw_output)

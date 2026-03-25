@@ -1,4 +1,4 @@
-from decision_intelligence.spec_matching.comparators import (
+from backend.technical.matching.similarity import (
     exact_match,
     numeric_match
 )

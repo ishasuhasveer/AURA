@@ -23,59 +23,106 @@ class RFPState(TypedDict):
 # ----------------------------
 # SALES NODE
 # ----------------------------
-def sales_node(state: RFPState) -> RFPState:
-    agent = SalesAgent()
+def sales_node(state):
+    try:
+        print("\n--- SALES NODE START ---")
 
-    sales_output = agent.process_rfp(
-        state["file_path"],
-        state["extracted_text"]
-    )
+        agent = SalesAgent()
 
-    state["sales"] = sales_output
-    return state
+        output = agent.process_rfp(
+            state["file_path"],
+            state["extracted_text"]
+        )
 
+        print("SALES OUTPUT:", output)
+
+        state["sales"] = output
+
+        print("--- SALES NODE END ---\n")
+
+        return state
+
+    except Exception as e:
+        print("❌ SALES NODE ERROR:", str(e))
+        raise
 
 # ----------------------------
 # NLP NODE (ANMOL PIPELINE)
 # ----------------------------
-def nlp_node(state: RFPState) -> RFPState:
+def nlp_node(state):
+    try:
+        print("\n--- NLP NODE START ---")
 
-    rfp_json = parse_rfp(state["file_path"])
+        rfp_json = parse_rfp(state["file_path"])
 
-    state["nlp"] = rfp_json
+        print("NLP OUTPUT:", rfp_json)
+        print("TYPE:", type(rfp_json))
 
-    return state
+        state["nlp"] = rfp_json
+
+        print("--- NLP NODE END ---\n")
+
+        return state
+
+    except Exception as e:
+        print("❌ NLP NODE ERROR:", str(e))
+        raise
 
 
 # ----------------------------
 # TECHNICAL NODE (ISHA LOGIC)
 # ----------------------------
-def technical_node(state: RFPState) -> RFPState:
+def technical_node(state):
+    try:
+        print("\n--- TECHNICAL NODE START ---")
 
-    technical_output = run_technical_agent(state["nlp"])
+        print("INPUT NLP:", state["nlp"])
 
-    state["technical"] = technical_output
+        output = run_technical_agent(state["nlp"])
 
-    return state
+        print("TECH OUTPUT:", output)
+
+        state["technical"] = output
+
+        print("--- TECHNICAL NODE END ---\n")
+
+        return state
+
+    except Exception as e:
+        print("❌ TECHNICAL NODE ERROR:", str(e))
+        raise
 
 
 # ----------------------------
 # PRICING NODE (BHARGAV)
 # ----------------------------
-def pricing_node(state: RFPState) -> RFPState:
+def pricing_node(state):
+    try:
+        print("\n--- PRICING NODE START ---")
 
-    pricing_agent = PricingAgent()
+        print("TECH INPUT:", state["technical"])
+        print("NLP INPUT:", state["nlp"])
 
-    quantities = state["nlp"].get("quantities", {})
+        pricing_agent = PricingAgent()
 
-    pricing_output = pricing_agent.run(
-        technical_output=state["technical"],
-        quantities=quantities
-    )
+        quantities = state["nlp"].get("quantities", {})
 
-    state["pricing"] = pricing_output
+        output = pricing_agent.run(
+            technical_output=state["technical"],
+            quantities=quantities
+        )
 
-    return state
+        print("PRICING OUTPUT:", output)
+
+        state["pricing"] = output
+
+        print("--- PRICING NODE END ---\n")
+
+        return state
+
+    except Exception as e:
+        print("❌ PRICING NODE ERROR:", str(e))
+        raise
 
 
 # ----------------------------
