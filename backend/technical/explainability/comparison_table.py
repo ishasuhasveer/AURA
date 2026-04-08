@@ -1,47 +1,46 @@
 import pandas as pd
 
 
-def build_explainability_table(explanation: list) -> pd.DataFrame:
+def build_explainability_table(explanation: dict) -> pd.DataFrame:
     """
-    Convert spec match explanation rows into a
+    Convert spec match explanation dict into a
     human-readable compliance table.
-
-    Input:
-    - explanation: list of dicts from compute_spec_match()
-
-    Output:
-    - pandas DataFrame suitable for UI / export
     """
 
     if not explanation:
         return pd.DataFrame()
 
-    df = pd.DataFrame(explanation)
+    # --------------------------------------------
+    # Convert dict → list of rows
+    # --------------------------------------------
+    rows = []
+
+    for spec, values in explanation.items():
+        rows.append({
+            "spec": spec,
+            "rfp_value": values.get("rfp"),
+            "sku_value": values.get("sku"),
+            "score": values.get("score")
+        })
+
+    df = pd.DataFrame(rows)
 
     # --------------------------------------------
-    # Add compliance status column
+    # Add compliance status
     # --------------------------------------------
-    def compliance_label(row):
-        if row["score"] == 1.0:
+    def compliance_label(score):
+        if score == 1:
             return "Compliant"
-        if row["score"] == 0.5:
+        elif score == 0.5:
             return "Partially Compliant"
-        return "Non-Compliant"
+        else:
+            return "Non-Compliant"
 
-    df["compliance_status"] = df.apply(compliance_label, axis=1)
+    df["compliance_status"] = df["score"].apply(compliance_label)
 
     # --------------------------------------------
-    # Reorder columns for readability
+    # Optional: sort by importance (score)
     # --------------------------------------------
-    df = df[
-        [
-            "spec",
-            "category",
-            "rfp_value",
-            "sku_value",
-            "score",
-            "compliance_status"
-        ]
-    ]
+    df = df.sort_values(by="score", ascending=False)
 
     return df

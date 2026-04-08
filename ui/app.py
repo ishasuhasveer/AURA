@@ -1,11 +1,9 @@
 import streamlit as st
 import requests
 import pandas as pd
-import altair as alt
-
 
 # -------------------------------
-# Page Configuration
+# Page Config
 # -------------------------------
 st.set_page_config(
     page_title="AURA — Agentic RFP Assistant",
@@ -13,305 +11,276 @@ st.set_page_config(
 )
 
 # -------------------------------
-# Header
+# GLOBAL STYLING
 # -------------------------------
-st.title("📄 AURA — Agentic RFP Response Automation")
+st.markdown("""
+<style>
 
-st.caption(
-    "An Agentic AI system for automated RFP qualification, "
-    "technical compliance analysis, and pricing estimation"
-)
+/* Background */
+.main {
+    background: radial-gradient(circle at top, #0f172a, #020617);
+    color: #e5e7eb;
+}
+
+/* Hero Title */
+.hero {
+    font-size: 42px;
+    font-weight: 700;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Glass Cards */
+.glass {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(12px);
+    border-radius: 14px;
+    padding: 18px;
+    border: 1px solid rgba(255,255,255,0.08);
+    margin-bottom: 20px;
+}
+
+/* Buttons */
+.stButton>button {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 10px;
+    color: white;
+    font-weight: 600;
+    border: none;
+    padding: 10px 18px;
+    transition: 0.3s;
+}
+.stButton>button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(139,92,246,0.4);
+}
+
+/* Metrics */
+[data-testid="stMetric"] {
+    background: rgba(255,255,255,0.04);
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: #020617;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# -------------------------------
+# HERO
+# -------------------------------
+st.markdown('<div class="hero">AURA — Agentic RFP Intelligence</div>', unsafe_allow_html=True)
+st.caption("AI-powered RFP automation platform")
 
 st.markdown("---")
 
 # -------------------------------
-# Backend Configuration
+# Backend URL
 # -------------------------------
 BACKEND_URL = "http://localhost:8000/process-rfp"
 
+# ===============================
+# 🧭 CONTROL PANEL
+# ===============================
+st.markdown("## ⚙️ Control Panel")
 
-# -------------------------------
-# Sidebar
-# -------------------------------
-with st.sidebar:
+col1, col2, col3 = st.columns(3)
 
-    st.header("🧠 System Overview")
+# -------- Product KB --------
+with col1:
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.subheader("📦 Product KB")
 
-    st.markdown(
-        """
-        **AURA** simulates how an industrial OEM responds to B2B RFPs.
+    catalogue_file = st.file_uploader("Upload Catalogue", type=["pdf"])
 
-        **Agentic Workflow**
-        - Sales Agent → Qualification  
-        - Document Intelligence → RFP Parsing  
-        - Technical Agent → SKU Matching  
-        - Pricing Agent → Cost Estimation  
+    if catalogue_file is not None:
+        st.info(f"{catalogue_file.name}")
 
-        **Tech Stack**
-        - FastAPI  
-        - LangGraph  
-        - Streamlit  
-        """
-    )
+        if st.button("Process Catalogue"):
+            with st.spinner("Processing catalogue..."):
+                files = {
+                    "file": (
+                        catalogue_file.name,
+                        catalogue_file.getvalue(),
+                        "application/pdf"
+                    )
+                }
 
-    st.markdown("---")
+                try:
+                    response = requests.post(
+                        "http://localhost:8000/upload-product-catalogue",
+                        files=files
+                    )
 
-    if st.button("🔄 Reset Analysis"):
-        st.session_state.clear()
-        st.rerun()
+                    if response.status_code == 200:
+                        st.balloons()
+                        st.success("Catalogue processed!")
+                    else:
+                        st.error("Failed")
+                        st.code(response.text)
 
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
-# -------------------------------
-# Upload Section
-# -------------------------------
-st.subheader("📤 Upload RFP Document")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader(
-    "Upload an RFP PDF file",
-    type=["pdf"]
-)
+# -------- Pricing KB --------
+with col2:
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.subheader("💰 Pricing KB")
 
+    pricing_file = st.file_uploader("Upload Pricing", type=["pdf"], key="pricing")
 
-# -------------------------------
-# Process Button
-# -------------------------------
-if uploaded_file is not None:
+    if pricing_file is not None:
+        st.info(f"{pricing_file.name}")
 
-    st.info(f"📎 Selected file: **{uploaded_file.name}**")
+        if st.button("Process Pricing"):
+            with st.spinner("Processing pricing..."):
+                files = {
+                    "file": (
+                        pricing_file.name,
+                        pricing_file.getvalue(),
+                        "application/pdf"
+                    )
+                }
 
-    if st.button("🚀 Process RFP"):
+                try:
+                    response = requests.post(
+                        "http://localhost:8000/upload-pricing",
+                        files=files
+                    )
 
-        with st.spinner("Running Agentic AI workflow..."):
+                    if response.status_code == 200:
+                        res = response.json()
 
-            files = {
-                "file": (
-                    uploaded_file.name,
-                    uploaded_file.getvalue(),
-                    "application/pdf"
-                )
-            }
+                        inserted = res.get("entries_added", 0)
 
-            try:
+                        if inserted == 0:
+                            st.warning("⚠️ No pricing data extracted. Check PDF format.")
+                        else:
+                            st.success(f"✅ Pricing processed! {inserted} entries added.")
+                    else:
+                        st.error("Failed")
+                        st.code(response.text)
 
-                response = requests.post(
-                    BACKEND_URL,
-                    files=files,
-                    timeout=120
-                )
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
-                if response.status_code != 200:
+    st.markdown('</div>', unsafe_allow_html=True)
 
-                    st.error("❌ Backend Error")
-                    st.code(response.text)
+# -------- RFP Upload --------
+with col3:
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.subheader("📤 RFP Processing")
 
-                else:
+    uploaded_file = st.file_uploader("Upload RFP", type=["pdf"])
 
-                    data = response.json()
-                    st.session_state["rfp_result"] = data
-                    st.success("✅ RFP processed successfully!")
+    if uploaded_file is not None:
+        st.info(f"{uploaded_file.name}")
 
-            except requests.exceptions.ConnectionError:
+        if st.button("Run AURA"):
+            with st.spinner("Running AI workflow..."):
+                files = {
+                    "file": (
+                        uploaded_file.name,
+                        uploaded_file.getvalue(),
+                        "application/pdf"
+                    )
+                }
 
-                st.error(
-                    "❌ Could not connect to backend.\n\n"
-                    "Make sure FastAPI is running on port 8000."
-                )
+                try:
+                    response = requests.post(
+                        BACKEND_URL,
+                        files=files,
+                        timeout=120
+                    )
 
-            except requests.exceptions.Timeout:
+                    if response.status_code == 200:
+                        st.session_state["rfp_result"] = response.json()
+                        st.balloons()
+                        st.success("RFP processed successfully!")
+                    else:
+                        st.error("Backend Error")
+                        st.code(response.text)
 
-                st.error("❌ Backend request timed out.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
-            except Exception as e:
+    st.markdown('</div>', unsafe_allow_html=True)
 
-                st.error(f"❌ Unexpected error: {e}")
+# ===============================
+# 📊 MAIN DASHBOARD
+# ===============================
+st.markdown("## 📊 Dashboard")
 
-
-# -------------------------------
-# Display Results
-# -------------------------------
 if "rfp_result" in st.session_state:
 
     data = st.session_state["rfp_result"]
-
-    st.markdown("---")
-    st.header("📊 RFP Analysis Dashboard")
 
     sales = data.get("rfp_summary", {})
     technical = data.get("technical_summary", {})
     pricing = data.get("pricing_summary", {})
 
-    recommended_skus_data = technical.get("recommended_skus", [])
-
-    # Extract only SKU IDs for UI
-    recommended_skus = [
-        sku["sku_id"] if isinstance(sku, dict) else sku
-        for sku in recommended_skus_data
-    ]
-    spec_scores = {
-        sku["sku_id"]: sku.get("spec_match_percent", 0)
-        for sku in recommended_skus_data
-    }
-    pricing_details = pricing.get("pricing_details", [])
-
     total_cost = pricing.get("total_estimated_cost", 0)
 
-    # -------------------------------
-    # Tabs Layout
-    # -------------------------------
-    tab1, tab2, tab3, tab4 = st.tabs(
-        [
-            "📊 Overview",
-            "🛠 Technical Analysis",
-            "💰 Pricing Insights",
-            "⚙️ Agent Workflow"
-        ]
-    )
+    # KPI ROW
+    k1, k2, k3, k4 = st.columns(4)
 
-    # ===============================
-    # OVERVIEW TAB
-    # ===============================
+    k1.metric("RFP ID", sales.get("rfp_id", "-"))
+    k2.metric("Deadline", sales.get("deadline", "-"))
+    k3.metric("Priority", sales.get("priority", "-"))
+    k4.metric("Total Cost", f"₹ {total_cost:,.0f}")
+
+    # CHARTS
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("### 💰 Cost Breakdown")
+        df_price = pd.DataFrame(pricing.get("pricing_details", []))
+
+        if not df_price.empty and "total_price" in df_price.columns:
+            st.bar_chart(df_price.set_index(df_price.columns[0])["total_price"])
+
+    with c2:
+        st.markdown("### 🛠 SKU Recommendations")
+        skus = technical.get("recommended_skus", [])
+
+        df_sku = pd.DataFrame({"SKU": skus})
+
+        if not df_sku.empty:
+            st.bar_chart(df_sku.value_counts())
+
+# ===============================
+# ⚙️ DETAILED INSIGHTS
+# ===============================
+st.markdown("---")
+st.markdown("## 🔍 Detailed Insights")
+
+if "rfp_result" in st.session_state:
+
+    data = st.session_state["rfp_result"]
+
+    tab1, tab2, tab3 = st.tabs(["Overview", "Technical", "Pricing"])
+
     with tab1:
+        st.json(data.get("rfp_summary", {}))
 
-        st.subheader("📄 RFP Summary")
-
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric("RFP ID", sales.get("rfp_id", "-"))
-        col2.metric("Deadline", sales.get("deadline", "-"))
-        col3.metric("Priority", sales.get("priority", "-"))
-
-        st.markdown("### Scope Summary")
-
-        st.info(
-            sales.get("scope_summary", "No scope summary available.")
-        )
-
-        st.markdown("### Estimated Bid Value")
-
-        st.metric(
-            "Total Estimated Cost",
-            f"₹ {total_cost:,.0f}"
-        )
-
-
-    # ===============================
-    # TECHNICAL TAB
-    # ===============================
     with tab2:
+        tech_data = data.get("technical_summary", {}).get("recommended_skus", [])
+        st.dataframe(pd.DataFrame(tech_data))
 
-        st.subheader("🛠 SKU Recommendations")
-
-        if recommended_skus:
-
-            df = pd.DataFrame({
-                "Recommended SKU": recommended_skus
-            })
-
-            st.dataframe(df, use_container_width=True)
-
-            # -----------------------
-            # Spec Match Chart
-            # -----------------------
-            if spec_scores:
-
-                st.markdown("### Spec Match Comparison")
-
-                chart_df = pd.DataFrame({
-                    "SKU": list(spec_scores.keys()),
-                    "Spec Match %": list(spec_scores.values())
-                })
-
-                chart = alt.Chart(chart_df).mark_bar().encode(
-                    x="SKU",
-                    y="Spec Match %",
-                    tooltip=["SKU", "Spec Match %"]
-                ).properties(height=350)
-
-                st.altair_chart(chart, use_container_width=True)
-
-            # -----------------------
-            # Interactive SKU Viewer
-            # -----------------------
-            selected_sku = st.selectbox(
-                "Inspect SKU",
-                recommended_skus
-            )
-
-            if selected_sku:
-                score = spec_scores.get(selected_sku, "N/A")
-
-                st.info(
-                    f"SKU: {selected_sku} | Spec Match: {score}%"
-                )
-
-        else:
-
-            st.info("No SKU recommendations available.")
-
-
-    # ===============================
-    # PRICING TAB
-    # ===============================
     with tab3:
-
-        st.subheader("💰 Pricing Breakdown")
-
-        if pricing_details:
-
-            pricing_rows = []
-
-            for item in pricing_details:
-                pricing_rows.append({
-                    "SKU": item.get("sku_id"),
-                    "Unit Price": item.get("unit_price", 0),
-                    "Quantity": item.get("quantity", 0),
-                    "Total Cost": item.get("total_price", 0)
-                })
-            pricing_df = pd.DataFrame(pricing_rows)
-
-            st.dataframe(pricing_df, use_container_width=True)
-
-            st.markdown("### Cost Comparison")
-
-            chart = alt.Chart(pricing_df).mark_bar().encode(
-                x="SKU",
-                y="Total Cost",
-                tooltip=["SKU", "Total Cost"]
-            ).properties(height=350)
-
-            st.altair_chart(chart, use_container_width=True)
-
-        else:
-
-            st.info("No pricing data available.")
-
-
-    # ===============================
-    # AGENT WORKFLOW TAB
-    # ===============================
-    with tab4:
-
-        st.subheader("⚙️ Agent Execution Pipeline")
-
-        workflow = [
-            ("Sales Agent", "RFP Qualification"),
-            ("Document Intelligence", "Requirement Extraction"),
-            ("Technical Agent", "SKU Matching"),
-            ("Pricing Agent", "Cost Estimation"),
-            ("Main Orchestrator", "Response Consolidation")
-        ]
-
-        for agent, task in workflow:
-
-            st.success(f"{agent} → {task}")
-
+        pricing_data = data.get("pricing_summary", {}).get("pricing_details", [])
+        st.dataframe(pd.DataFrame(pricing_data))
 
 # -------------------------------
 # Footer
 # -------------------------------
 st.markdown("---")
-
-st.caption(
-    "AURA — Agentic AI-based B2B RFP Response Automation System\n\n"
-    "Capstone Project | Demonstrates Agentic AI, NLP, and Decision Support Systems"
-)
+st.caption("AURA — AI-driven RFP Intelligence Platform")

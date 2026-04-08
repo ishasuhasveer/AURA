@@ -2,16 +2,13 @@ from backend.technical.matching.spec_match import compute_spec_match
 
 
 def rank_skus_by_spec_match(rfp_spec: dict, skus: list, top_k: int = 3):
-    """
-    Rank OEM SKUs based on Spec Match % for a given RFP.
-
-    Returns a list of ranked SKU results.
-    """
 
     ranked_results = []
 
     for sku in skus:
-        score, explanation = compute_spec_match(rfp_spec, sku)
+        sku_specs = sku.get("specs", {})   # ✅ FIX HERE
+
+        score, explanation = compute_spec_match(rfp_spec, sku_specs)
 
         ranked_results.append({
             "sku_id": sku.get("sku_id"),
@@ -19,7 +16,6 @@ def rank_skus_by_spec_match(rfp_spec: dict, skus: list, top_k: int = 3):
             "explanation": explanation
         })
 
-    # Sort descending by spec match %
     ranked_results.sort(
         key=lambda x: x["spec_match_percent"],
         reverse=True

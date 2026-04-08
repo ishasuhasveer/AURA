@@ -4,78 +4,46 @@ from backend.technical.matching.similarity import (
 )
 
 
-def compute_spec_match(rfp_spec: dict, sku: dict):
+def compute_spec_match(rfp_spec: dict, sku_spec: dict):
     """
-    Compute Spec Match % between one RFP specification
-    and one OEM SKU.
-
+    Compare RFP specs with SKU specs.
     Returns:
-    - spec_match_percent (float)
-    - explanation (list of dicts)
+    - match %
+    - detailed explanation
     """
 
-    scores = []
-    explanation = []
+    total = len(rfp_spec)
+    matched = 0
+    explanation = {}
 
-    # --------------------------------------------------
-    # 1. Mandatory specifications (hard requirements)
-    # --------------------------------------------------
-    mandatory_fields = [
-        "voltage",
-        "conductor",
-        "insulation",
-        "standard"
-    ]
+    for key, rfp_value in rfp_spec.items():
 
-    for field in mandatory_fields:
-        rfp_value = rfp_spec.get(field)
-        sku_value = sku.get(field)
+        sku_value = sku_spec.get(key)
 
-        score = exact_match(rfp_value, sku_value)
+        if sku_value is None:
+            score = 0
 
-        # Only evaluate if RFP specified the field
-        if score is not None:
-            scores.append(score)
-            explanation.append({
-                "spec": field,
-                "category": "mandatory",
-                "rfp_value": rfp_value,
-                "sku_value": sku_value,
-                "score": score
-            })
+        elif isinstance(rfp_value, (int, float)):
+            diff = abs(rfp_value - sku_value)
 
-    # --------------------------------------------------
-    # 2. Optional specifications (scoring preferences)
-    # --------------------------------------------------
-    rfp_attrs = rfp_spec.get("attributes", {})
-    sku_attrs = sku.get("attributes", {})
+            if diff == 0:
+                score = 1
+            elif diff <= 0.1 * rfp_value:
+                score = 0.5
+            else:
+                score = 0
 
-    for attr, rfp_value in rfp_attrs.items():
-        if rfp_value is None:
-            continue
-
-        sku_value = sku_attrs.get(attr)
-
-        if isinstance(rfp_value, (int, float)):
-            score = numeric_match(rfp_value, sku_value)
         else:
-            score = exact_match(rfp_value, sku_value)
+            score = 1 if rfp_value == sku_value else 0
 
-        scores.append(score)
-        explanation.append({
-            "spec": attr,
-            "category": "optional",
-            "rfp_value": rfp_value,
-            "sku_value": sku_value,
-            "score": score == 1
-        })
+        matched += score
 
-    # --------------------------------------------------
-    # 3. Final Spec Match %
-    # --------------------------------------------------
-    if not scores:
-        spec_match_percent = 0.0
-    else:
-        spec_match_percent = round((sum(scores) / len(scores)) * 100, 2)
+        explanation[key] = {
+            "rfp": rfp_value,
+            "sku": sku_value,
+            "score": score
+        }
 
-    return spec_match_percent, explanation
+    percent = (matched / total) * 100 if total > 0 else 0
+
+    return percent, explanation

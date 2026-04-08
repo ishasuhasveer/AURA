@@ -1,81 +1,104 @@
-import pandas as pd
-from pathlib import Path
+from typing import Any
+from backend.database.mongo_client import db
 
 
-# ---------------- PATH ----------------
-PRICING_TABLE_PATH = Path("data/pricing.csv")
-
-
-# ---------------- LOAD TABLE ----------------
-def load_pricing_table() -> pd.DataFrame:
+# ---------------- APPLY RULES ----------------
+def apply_pricing_rules(base_price: float, sku: dict) -> float:
     """
-    Load SKU pricing table.
+    Apply pricing rules from MongoDB (pricing_rules collection)
     """
-    if not PRICING_TABLE_PATH.exists():
-        raise FileNotFoundError("Pricing table not found at data/pricing.csv")
 
-    return pd.read_csv(PRICING_TABLE_PATH)
+    specs = sku.get("specs", {})
+    product_type = specs.get("product_type")
+
+    rules = list(db["pricing_rules"].find())
+
+    final_price = base_price
+
+    for rule in rules:
+
+        rule_type = rule.get("rule_type")
+        rule_product = rule.get("product_type")
+        percentage = rule.get("percentage", 0)
+
+        # Apply product-specific rules
+        if rule_product == product_type:
+            final_price *= (1 + percentage / 100)
+
+        # Apply global rules
+        elif rule_product == "ALL":
+            final_price *= (1 + percentage / 100)
+
+    return final_price
+
+
+# ---------------- PRICE LOOKUP ----------------
+def get_price_for_sku(sku: dict):
+
+    specs = sku.get("specs", {})
+
+    cross_section = specs.get("cross_section_mm2")
+    cores = specs.get("cores")
+    product_type = specs.get("product_type")
+    conductor = specs.get("conductor", "").lower()
+
+    # ---------------- MULTICORE ----------------
+    if cross_section and cores and product_type:
+        price_doc = db["pricing_catalog"].find_one({
+            "cross_section_mm2": cross_section,
+            "cores": cores,
+            "product_type": product_type
+        })
+
+        if price_doc:
+            return price_doc.get("price_per_meter", 0)
+
+    # ---------------- WIRES ----------------
+    if cross_section:
+        price_doc = db["pricing_catalog"].find_one({
+            "cross_section_mm2": cross_section,
+            "material": conductor
+        })
+
+        if price_doc:
+            return price_doc.get("price_per_meter", 0)
+
+    return 0
 
 
 # ---------------- COMPUTE PRICING ----------------
-def compute_pricing(recommended_skus: list, quantities: dict) -> dict:
-    """
-    Calculate total estimated cost using realistic pricing columns.
-    """
+def compute_pricing(sku_objects: list, quantities: dict) -> dict[str, list[Any] | int]:
 
-    pricing_table = load_pricing_table()
-
-    sku_costs = {}
+    pricing_list = []
     total_cost = 0
 
-    for sku in recommended_skus:
+    for sku in sku_objects:
 
-        price_row = pricing_table[pricing_table["sku_id"] == sku]
+        sku_id = sku.get("sku_id")
 
-        if price_row.empty:
-            material = 0
-            testing = 0
-            insulation = 0
-            manufacturing = 0
-            final_price = 0
-        else:
-            row = price_row.iloc[0]
-
-            material = float(row.get("material_cost", 0))
-            testing = float(row.get("testing_cost", 0))
-            insulation = float(row.get("insulation_cost", 0))
-            manufacturing = float(row.get("manufacturing_cost", 0))
-            final_price = float(row.get("final_price_per_meter", 0))
-
-        qty = quantities.get("estimated_quantity", 1)
+        qty = quantities.get(sku_id, 1)
         if not qty:
             qty = 1
-        total = final_price * qty
 
-        sku_costs[sku] = {
-            "material_cost": material,
-            "testing_cost": testing,
-            "insulation_cost": insulation,
-            "manufacturing_cost": manufacturing,
-            "unit_price": final_price,
+        # -------- BASE PRICE --------
+        base_price = get_price_for_sku(sku)
+
+        # -------- APPLY RULES --------
+        final_unit_price = apply_pricing_rules(base_price, sku)
+
+        total = final_unit_price * qty
+
+        pricing_list.append({
+            "sku_id": sku_id,
+            "base_unit_price": base_price,
+            "final_unit_price": final_unit_price,
             "quantity": qty,
-            "total": total
-        }
+            "total_price": total
+        })
 
         total_cost += total
 
-    pricing_list = []
-
-    for sku, details in sku_costs.items():
-        pricing_list.append({
-            "sku_id": sku,
-            "material_cost": details["material_cost"],
-            "testing_cost": details["testing_cost"],
-            "insulation_cost": details["insulation_cost"],
-            "manufacturing_cost": details["manufacturing_cost"],
-            "unit_price": details["unit_price"],
-            "quantity": details["quantity"],
-            "total_price": details["total"]
-        })
-
-    return pricing_list
+    return {
+        "pricing_details": pricing_list,
+        "total_estimated_cost": total_cost
+    }

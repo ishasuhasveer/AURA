@@ -1,6 +1,6 @@
 from backend.technical.matching.ranking import rank_skus_by_spec_match
 from backend.technical.explainability.comparison_table import build_explainability_table
-
+from backend.database.mongo_client import get_all_products
 
 class TechnicalAgent:
     """
@@ -53,28 +53,10 @@ def run_technical_agent(rfp_data: dict) -> dict:
     # ---------------- EXTRACT RFP REQUIREMENTS ----------------
     tech_req = rfp_data.get("technical_requirements", {})
 
-    rfp_spec = {
-        "voltage": tech_req.get("voltage"),
-        "conductor": tech_req.get("conductor"),
-        "standard": tech_req.get("standard"),
-    }
+    rfp_spec = tech_req
 
-    # ---------------- SAMPLE SKU DATABASE ----------------
-    # (Replace later with real datasheet parsing)
-    skus = [
-        {
-            "sku_id": "SKU_001",
-            "voltage": "11kV",
-            "conductor": "copper",
-            "standard": "IEC",
-        },
-        {
-            "sku_id": "SKU_002",
-            "voltage": "33kV",
-            "conductor": "aluminium",
-            "standard": "IEC",
-        }
-    ]
+    # ---------------- FETCH REAL SKUs ----------------
+    skus = get_all_products()
 
     # ---------------- RUN AGENT ----------------
     agent = TechnicalAgent(top_k=3)
@@ -85,15 +67,23 @@ def run_technical_agent(rfp_data: dict) -> dict:
     )
 
     # ---------------- FORMAT OUTPUT ----------------
-    formatted_results = []
+    recommended = []
+    scores = {}
+    comparison_tables = []
 
     for r in results:
-        formatted_results.append({
-            "sku_id": r["sku_id"],
-            "spec_match_percent": r["spec_match_percent"],
-            "compliance_table": r["compliance_table"].to_dict(orient="records")
+        sku_id = r["sku_id"]
+
+        recommended.append(sku_id)
+        scores[sku_id] = r["spec_match_percent"]
+
+        comparison_tables.append({
+            "sku_id": sku_id,
+            "table": r["compliance_table"].to_dict(orient="records")
         })
 
     return {
-        "recommended_skus": formatted_results
+        "recommended_skus": recommended,
+        "spec_match_scores": scores,
+        "comparison_table": comparison_tables
     }

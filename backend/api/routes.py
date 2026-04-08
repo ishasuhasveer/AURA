@@ -1,7 +1,10 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 import os
+from backend.services.catalogue_service import process_catalogue
+from backend.pricing.pricing_loader import load_pricing_from_pdf
 
 from backend.agents.orchestrator import MainOrchestrator
+
 
 router = APIRouter()
 
@@ -61,3 +64,38 @@ async def process_rfp(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Unexpected internal error: {str(e)}"
         )
+
+
+
+#Related to catalogue uploading
+
+
+
+@router.post("/upload-product-catalogue")
+async def upload_catalogue(file: UploadFile = File(...)):
+
+    file_path = f"temp_{file.filename}"
+
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    result = process_catalogue(file_path)
+
+    return {
+        "message": "Catalogue processed successfully",
+        "products_added": result["inserted"]
+    }
+
+#===============PRICING RELATED==================
+
+@router.post("/upload-pricing")
+async def upload_pricing(file: UploadFile = File(...)):
+
+    content = await file.read()
+
+    entries_added = load_pricing_from_pdf(content)
+
+    return {
+        "status": "success",
+        "entries_added": entries_added
+    }
