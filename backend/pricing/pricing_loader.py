@@ -14,56 +14,83 @@ def is_number(value):
         return False
 
 
-def clean_value(val):
-    if val is None:
-        return None
-    return str(val).replace(",", "").strip()
-
-
 def is_valid_price(value):
     return 10 <= value <= 10000000
 
 
-def detect_product_type_from_table(table):
-    """
-    Detect product type per table (NOT per page)
-    """
-    text = " ".join(
-        [cell for row in table for cell in row if cell]
-    ).lower()
+# ---------------- TEXT EXTRACTION (ROBUST) ----------------
 
-    if "zhfr" in text or "hffr" in text:
-        return "ZHFR"
-    elif "frls" in text:
-        return "FRLS"
-    elif "fr" in text:
-        return "FR"
+def extract_rows_from_text(text: str):
+    lines = text.split("\n")
+    valid_rows = []
 
-    return "UNKNOWN"
+    for line in lines:
+        nums = re.findall(r"\d+\.?\d*", line)
+
+        # At least 5 numbers → real pricing row
+        if len(nums) >= 5:
+            valid_rows.append(nums)
+
+    return valid_rows
 
 
-def extract_core_mapping(header_row):
-    """
-    Robust mapping: "2 CORE" → 2
-    """
-    core_map = {}
+def split_row(nums):
+    first = nums[0]
 
-    for idx, col in enumerate(header_row):
-        if not col:
+    for i in range(1, len(nums)):
+        if nums[i] == first:
+            return nums[:i], nums[i:]
+
+    return nums, []
+
+
+def process_side(nums, cable_type):
+    results = []
+
+    if not nums:
+        return results
+
+    cross_section = float(nums[0])
+    prices = nums[1:]
+
+    core_labels = [1, 2, 3, 3.5, 4]
+
+    for i, price in enumerate(prices):
+        if i >= len(core_labels):
+            break
+
+        if not is_number(price):
             continue
 
-        col = col.lower()
+        val = float(price)
 
-        match = re.search(r"(\d+)\s*c", col)
-        if match:
-            core_map[idx] = int(match.group(1))
+        if not is_valid_price(val):
+            continue
 
-    return core_map
+        results.append({
+            "cross_section_mm2": cross_section,
+            "cores": float(core_labels[i]),
+            "product_type": "FRLS",   # default safe
+            "cable_type": cable_type,
+            "price_per_meter": val,
+            "price_per_100m": val * 100
+        })
+
+    return results
 
 
-def is_header_row(row):
-    text = " ".join([c for c in row if c]).lower()
-    return bool(re.search(r"\b\d+\s*core\b", text))
+def parse_rows(rows):
+    results = []
+
+    for nums in rows:
+        left, right = split_row(nums)
+
+        results.extend(process_side(left, "UNARMOURED"))
+
+        if right:
+            results.extend(process_side(right, "ARMOURED"))
+
+    return results
 
 
 # ---------------- RULE EXTRACTION ----------------
@@ -92,12 +119,9 @@ def extract_pricing_rules(text: str):
             rule_type = "armouring"
             product_type = "ALL"
 
-        elif "pvc" in keyword or "insulation" in keyword:
-            rule_type = "insulation"
-            product_type = "ALL"
-
         else:
-            continue
+            rule_type = "misc"
+            product_type = "ALL"
 
         rules.append({
             "rule_type": rule_type,
@@ -105,18 +129,14 @@ def extract_pricing_rules(text: str):
             "percentage": float(percent)
         })
 
-    # deduplicate
-    unique = {}
-    for r in rules:
-        key = (r["rule_type"], r["product_type"])
-        unique[key] = r
-
-    return list(unique.values())
+    return rules
 
 
 # ---------------- MAIN LOADER ----------------
 
 def load_pricing_from_pdf(file_bytes: bytes) -> int:
+
+    db["pricing_catalog"].delete_many({})  # 🔥 clean insert
 
     inserted_count = 0
     rules_inserted = 0
@@ -125,131 +145,43 @@ def load_pricing_from_pdf(file_bytes: bytes) -> int:
 
         for page in pdf.pages:
 
-            # ---------------- RULE EXTRACTION ----------------
-            page_text = page.extract_text() or ""
+            text = page.extract_text() or ""
 
-            rules = extract_pricing_rules(page_text)
+            print("\n--- PAGE ---")
+            print(text[:200])
 
-            for rule in rules:
-                print("RULE DETECTED:", rule)
+            # -------- RULES --------
+            rules = extract_pricing_rules(text)
 
+            for r in rules:
                 db["pricing_rules"].update_one(
-                    {
-                        "rule_type": rule["rule_type"],
-                        "product_type": rule["product_type"]
-                    },
-                    {"$set": rule},
+                    {"rule_type": r["rule_type"], "product_type": r["product_type"]},
+                    {"$set": r},
                     upsert=True
                 )
-
                 rules_inserted += 1
 
-            # ---------------- TABLE EXTRACTION ----------------
-            tables = page.extract_tables()
+            # -------- TEXT PARSING --------
+            rows = extract_rows_from_text(text)
+            print("ROWS FOUND:", len(rows))
 
-            if not tables:
-                continue
+            parsed = parse_rows(rows)
+            print("PARSED:", len(parsed))
 
-            for table in tables:
+            for row in parsed:
+                db["pricing_catalog"].update_one(
+                    {
+                        "cross_section_mm2": row["cross_section_mm2"],
+                        "cores": row["cores"],
+                        "product_type": row["product_type"],
+                        "cable_type": row["cable_type"]
+                    },
+                    {"$set": row},
+                    upsert=True
+                )
+                inserted_count += 1
 
-                if not table or len(table) < 2:
-                    continue
-
-                # Clean table
-                table = [
-                    [clean_value(cell) for cell in row]
-                    for row in table
-                ]
-
-                # Detect product type per table
-                product_type = detect_product_type_from_table(table)
-
-                if product_type == "UNKNOWN":
-                    print("⚠️ Skipping unknown table")
-                    continue
-
-                # Find header row
-                header_row = None
-
-                for row in table:
-                    if is_header_row(row):
-                        header_row = row
-                        break
-
-                if not header_row:
-                    header_row = table[0]
-
-                core_map = extract_core_mapping(header_row)
-
-                if not core_map:
-                    print("⚠️ No core mapping found")
-                    continue
-
-                header_found = False
-
-                for row in table:
-
-                    # Skip until header
-                    if row == header_row:
-                        header_found = True
-                        continue
-
-                    if not header_found:
-                        continue
-
-                    if not row or not is_number(row[0]):
-                        continue
-
-                    try:
-                        cross_section = float(row[0])
-                    except:
-                        continue
-
-                    # Validation
-                    if cross_section <= 0 or cross_section > 1000:
-                        continue
-
-                    for col_idx, cores in core_map.items():
-
-                        if col_idx >= len(row):
-                            continue
-
-                        cell = row[col_idx]
-
-                        if not is_number(cell):
-                            continue
-
-                        price_per_100m = float(cell)
-
-                        # Validate price
-                        if not is_valid_price(price_per_100m):
-                            print("❌ INVALID PRICE:", cell)
-                            continue
-
-                        price_per_meter = price_per_100m / 100
-
-                        print(
-                            f"INSERTING: {cross_section} sqmm | {cores}C | {product_type}"
-                        )
-
-                        db["pricing_catalog"].update_one(
-                            {
-                                "cross_section_mm2": cross_section,
-                                "cores": cores,
-                                "product_type": product_type
-                            },
-                            {
-                                "$set": {
-                                    "price_per_100m": price_per_100m,
-                                    "price_per_meter": price_per_meter
-                                }
-                            },
-                            upsert=True
-                        )
-
-                        inserted_count += 1
-
-    print("\n✅ TOTAL PRICES INSERTED:", inserted_count)
-    print("✅ TOTAL RULES INSERTED:", rules_inserted)
+    print("\n✅ INSERTED:", inserted_count)
+    print("✅ RULES:", rules_inserted)
 
     return inserted_count
