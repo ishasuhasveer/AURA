@@ -1,37 +1,52 @@
 import spacy
 from typing import List, Dict
 
-
-# Load spaCy model once
+# Load spaCy model
 nlp = spacy.load("en_core_web_sm")
 
 
-def extract_entities_from_chunks(chunks: List[str]) -> Dict[str, list]:
+def extract_entities(text: str) -> Dict:
     """
-    Extract entities from text chunks using spaCy NER.
+    Extract relevant entities (structured)
     """
+
+    doc = nlp(text)
 
     entities = {
-        "ORG": set(),        # Manufacturers, organizations
-        "QUANTITY": set(),   # Measurements
-        "PRODUCT": set(),    # Custom label via heuristics
-        "MATERIAL": set()    # Custom label via heuristics
+        "materials": set(),
+        "organizations": set(),
+        "measurements": set()
     }
 
-    for chunk in chunks:
-        doc = nlp(chunk)
+    for ent in doc.ents:
 
-        # Standard spaCy entities
-        for ent in doc.ents:
-            if ent.label_ in ["ORG", "QUANTITY"]:
-                entities[ent.label_].add(ent.text)
+        if ent.label_ in ["ORG"]:
+            entities["organizations"].add(ent.text)
 
-        # Heuristic-based enrichment (important for specs)
-        for token in doc:
-            if token.text.upper() in ["COPPER", "ALUMINIUM", "PVC", "HDPE", "XLPE"]:
-                entities["MATERIAL"].add(token.text.upper())
+        if ent.label_ in ["QUANTITY"]:
+            entities["measurements"].add(ent.text)
 
-            if "CABLE" in token.text.upper():
-                entities["PRODUCT"].add(token.text)
+        # Custom filtering for materials
+        if any(word in ent.text.upper() for word in ["COPPER", "PVC", "HDPE", "XLPE"]):
+            entities["materials"].add(ent.text.upper())
 
-    return {k: sorted(list(v)) for k, v in entities.items()}
+    # Convert sets → lists
+    return {k: list(v) for k, v in entities.items()}
+
+
+# -------------------------------
+# TEST BLOCK
+# -------------------------------
+if __name__ == "__main__":
+
+    sample_text = """
+    25 core copper cable with HDPE insulation rated for 3 KV as per IS 8130.
+    Manufactured by Polycab and CMI.
+    """
+
+    result = extract_entities(sample_text)
+
+    import json
+
+    print("\n=== NER OUTPUT ===\n")
+    print(json.dumps(result, indent=4))
