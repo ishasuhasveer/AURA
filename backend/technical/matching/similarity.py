@@ -1,62 +1,50 @@
 def exact_match(rfp_value, sku_value):
     """
-    Exact match comparator for categorical specs.
-
-    Used for:
-    - voltage
-    - conductor
-    - insulation
-    - standard
-    - armouring
-
-    Returns:
-    - 1.0 → exact match
-    - 0.0 → mismatch or missing SKU value
-    - None → RFP did not specify this field (do not evaluate)
+    Exact + partial match comparator for categorical specs.
     """
 
-    # RFP did not ask for this spec → ignore
     if rfp_value is None:
         return None
 
-    # SKU does not have this spec → non-compliant
     if sku_value is None:
         return 0.0
 
-    # Normalize before comparison
     rfp_norm = str(rfp_value).strip().upper()
     sku_norm = str(sku_value).strip().upper()
 
-    return 1.0 if rfp_norm == sku_norm else 0.0
+    # Exact match
+    if rfp_norm == sku_norm:
+        return 1.0
 
-def numeric_match(rfp_value, sku_value):
+    # Partial match (substring)
+    if rfp_norm in sku_norm or sku_norm in rfp_norm:
+        return 0.5
+
+    return 0.0
+
+
+def numeric_match(rfp_value, sku_value, tolerance=0.05):
     """
-    Numeric match comparator for quantitative specs.
-
-    Used for:
-    - cross_section_mm2
-    - core_count (if ever used)
-
-    Rules:
-    - SKU == RFP → 1.0
-    - SKU > RFP  → 0.5 (acceptable over-capacity)
-    - SKU < RFP  → 0.0 (non-compliant)
+    Numeric match with tolerance and safe parsing.
     """
 
-    # RFP did not specify → ignore
     if rfp_value is None:
         return None
 
-    # SKU missing value → non-compliant
     if sku_value is None:
         return 0.0
 
-    rfp_val = float(rfp_value)
-    sku_val = float(sku_value)
+    try:
+        rfp_val = float(str(rfp_value).replace(" ", "").replace("mm2", "").replace("sq", ""))
+        sku_val = float(str(sku_value).replace(" ", "").replace("mm2", "").replace("sq", ""))
+    except Exception:
+        return 0.0  # fallback safe
 
-    if sku_val == rfp_val:
+    # Within tolerance → exact
+    if abs(sku_val - rfp_val) / (rfp_val + 1e-10) <= tolerance:
         return 1.0
 
+    # Over-spec
     if sku_val > rfp_val:
         return 0.5
 
