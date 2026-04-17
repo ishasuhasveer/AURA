@@ -51,15 +51,17 @@ def get_price_for_sku(sku: dict):
     specs = sku.get("specs", {})
 
     cross_section = specs.get("cross_section_mm2")
-    cores = specs.get("cores")
-    product_type = specs.get("product_type")
-    cable_type = specs.get("cable_type")
+    cores = specs.get("cores", 1)
+    product_type = specs.get("product_type", "FRLS")
+    cable_type = specs.get("cable_type", "UNARMOURED")
+
+    print("DEBUG MATCHING:", cross_section, cores, product_type, cable_type)
 
     if cross_section and cores and product_type and cable_type:
 
         price_doc = db["pricing_catalog"].find_one({
             "cross_section_mm2": cross_section,
-            "cores": float(cores),
+            "cores": cores,
             "product_type": product_type,
             "cable_type": cable_type
         })
@@ -69,7 +71,7 @@ def get_price_for_sku(sku: dict):
 
         # fallback nearest
         nearest = list(db["pricing_catalog"].find({
-            "cores": float(cores),
+            "cores": cores,
             "product_type": product_type,
             "cable_type": cable_type
         }))
@@ -83,7 +85,6 @@ def get_price_for_sku(sku: dict):
 
     print("❌ No price found for SKU:", sku.get("sku_id"))
     return 0
-
 # ---------------- COMPUTE PRICING ----------------
 def compute_pricing(sku_objects: list, quantities: dict) -> dict[str, list[Any] | int]:
 

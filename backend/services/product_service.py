@@ -9,7 +9,7 @@ from backend.technical.datasheets.segmenter import (
     split_catalogue_into_products
 )
 
-from backend.database.collections import products_collection
+from backend.database.collections_db import products_collection
 
 
 async def process_catalogue_upload(file):

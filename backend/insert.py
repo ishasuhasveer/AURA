@@ -1,4 +1,4 @@
-from backend.database.collections import products_collection
+from backend.database.collections_db import products_collection
 
 products_collection.insert_one({
     "sku_name": "Test Cable",

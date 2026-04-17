@@ -1,6 +1,7 @@
 # backend/agents/pricing_agent.py
 
 from backend.pricing.pricing_engine import compute_pricing
+from backend.database.mongo_client import db
 
 
 class PricingAgent:
@@ -27,26 +28,64 @@ class PricingAgent:
                 "message": "No SKUs available for pricing"
             }
 
-        # Extract SKU IDs
-        sku_ids = [item["sku_id"] for item in recommended]
+        # Handle both formats safely
+        if isinstance(recommended, list) and len(recommended) > 0:
+
+            if isinstance(recommended[0], str):
+                sku_ids = recommended
+
+            elif isinstance(recommended[0], dict):
+                sku_ids = [
+                    item.get("sku_id")
+                    for item in recommended
+                    if isinstance(item, dict) and "sku_id" in item
+                ]
+
+            else:
+                raise ValueError(f"Unexpected SKU format: {type(recommended[0])}")
+
+        else:
+            sku_ids = []
+
+        print("DEBUG SKU IDS:", sku_ids)
+
+        # ---------------- FETCH SKU OBJECTS FROM DB ----------------
+        sku_objects = list(db["products"].find({
+            "sku_id": {"$in": sku_ids}
+        }))
+
+        print("DEBUG SKU OBJECTS:", sku_objects)
+
+        # 🚨 SAFETY CHECK
+        if not sku_objects:
+            return {
+                "pricing_details": [],
+                "total_estimated_cost": 0,
+                "error": "No matching SKU objects found in DB"
+            }
 
         # ---------------- SAFE QUANTITY ----------------
         quantity = list(quantities.values())[0] if quantities else 1
+        quantity = quantity if quantity else 1
 
+        # Map quantity per SKU (engine expects sku_id mapping)
         safe_quantities = {
-            "estimated_quantity": quantity if quantity else 1
+            sku.get("sku_id"): quantity
+            for sku in sku_objects
         }
+
+        print("DEBUG FINAL QUANTITIES:", safe_quantities)
 
         # ---------------- COMPUTE PRICING ----------------
         pricing_result = compute_pricing(
-            recommended_skus=sku_ids,
-            quantities=safe_quantities
+            sku_objects,
+            safe_quantities
         )
 
         print("DEBUG pricing_result:", pricing_result)
         print("DEBUG type:", type(pricing_result))
 
-        # 🔥 SAFETY CHECK
+        # ---------------- SAFETY CHECK ----------------
         if isinstance(pricing_result, str):
             return {
                 "pricing_details": [],
@@ -54,18 +93,8 @@ class PricingAgent:
                 "error": pricing_result
             }
 
-        if not isinstance(pricing_result, list):
-            raise ValueError(f"Invalid pricing output type: {type(pricing_result)}")
+        # ⚠️ IMPORTANT: your engine returns dict, not list
+        if isinstance(pricing_result, dict):
+            return pricing_result
 
-        # ---------------- TOTAL COST ----------------
-        total_cost = sum(
-            item.get("total_price", 0)
-            for item in pricing_result
-            if isinstance(item, dict)
-        )
-
-        # ---------------- FORMAT OUTPUT ----------------
-        return {
-            "pricing_details": pricing_result,
-            "total_estimated_cost": total_cost
-        }
+        raise ValueError(f"Invalid pricing output type: {type(pricing_result)}")

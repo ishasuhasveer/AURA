@@ -1,6 +1,6 @@
 from backend.catalogue.extractor import CatalogueExtractor
 from backend.catalogue.parser import CatalogueParser
-from backend.database.collections import products_collection
+from backend.database.collections_db import products_collection
 
 
 def process_catalogue(file_path: str):
