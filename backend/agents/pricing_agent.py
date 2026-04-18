@@ -50,9 +50,18 @@ class PricingAgent:
         print("DEBUG SKU IDS:", sku_ids)
 
         # ---------------- FETCH SKU OBJECTS FROM DB ----------------
-        sku_objects = list(db["products"].find({
+        raw_skus = list(db["products"].find({
             "sku_id": {"$in": sku_ids}
         }))
+
+        # 🔥 FIX: Deduplicate by sku_id (keep first occurrence)
+        unique_skus = {}
+        for sku in raw_skus:
+            sid = sku.get("sku_id")
+            if sid not in unique_skus:
+                unique_skus[sid] = sku
+
+        sku_objects = list(unique_skus.values())
 
         print("DEBUG SKU OBJECTS:", sku_objects)
 
@@ -65,7 +74,9 @@ class PricingAgent:
             }
 
         # ---------------- SAFE QUANTITY ----------------
-        quantity = list(quantities.values())[0] if quantities else 1
+        quantity = next(iter(quantities.values()), 1)
+        if not quantity:
+            quantity = 1
         quantity = quantity if quantity else 1
 
         # Map quantity per SKU (engine expects sku_id mapping)

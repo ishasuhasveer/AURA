@@ -4,12 +4,15 @@ from langgraph.graph import StateGraph, END
 # Agents
 from backend.agents.sales_agent import SalesAgent
 from backend.agents.pricing_agent import PricingAgent
-
-# External pipelines
-from backend.document_intelligence.rfp_parser import parse_rfp
 from backend.agents.technical_agent import run_technical_agent
 
+# NLP
+from backend.document_intelligence.rfp_parser import parse_rfp
 
+
+# ----------------------------
+# STATE DEFINITION
+# ----------------------------
 class RFPState(TypedDict):
     file_path: str
     extracted_text: str
@@ -24,109 +27,156 @@ class RFPState(TypedDict):
 # SALES NODE
 # ----------------------------
 def sales_node(state):
-    try:
-        print("\n--- SALES NODE START ---")
+    print("\n--- SALES NODE START ---")
 
-        agent = SalesAgent()
+    agent = SalesAgent()
 
-        output = agent.process_rfp(
-            state["file_path"],
-            state["extracted_text"]
-        )
+    output = agent.process_rfp(
+        state["file_path"],
+        state["extracted_text"]
+    )
 
-        print("SALES OUTPUT:", output)
+    print("SALES OUTPUT:", output)
 
-        state["sales"] = output
+    state["sales"] = output
 
-        print("--- SALES NODE END ---\n")
+    print("--- SALES NODE END ---\n")
+    return state
 
-        return state
-
-    except Exception as e:
-        print("❌ SALES NODE ERROR:", str(e))
-        raise
 
 # ----------------------------
-# NLP NODE (ANMOL PIPELINE)
+# NLP NODE
 # ----------------------------
 def nlp_node(state):
-    try:
-        print("\n--- NLP NODE START ---")
+    print("\n--- NLP NODE START ---")
 
-        rfp_json = parse_rfp(state["file_path"])
+    rfp_json = parse_rfp(state["file_path"])
 
-        print("NLP OUTPUT:", rfp_json)
-        print("TYPE:", type(rfp_json))
+    print("NLP OUTPUT:", rfp_json)
 
-        state["nlp"] = rfp_json
+    if not rfp_json:
+        raise ValueError("❌ NLP returned empty output")
 
-        print("--- NLP NODE END ---\n")
+    state["nlp"] = rfp_json
 
-        return state
-
-    except Exception as e:
-        print("❌ NLP NODE ERROR:", str(e))
-        raise
+    print("--- NLP NODE END ---\n")
+    return state
 
 
 # ----------------------------
-# TECHNICAL NODE (ISHA LOGIC)
+# TECHNICAL NODE (FINAL)
 # ----------------------------
 def technical_node(state):
-    try:
-        print("\n--- TECHNICAL NODE START ---")
+    print("\n--- TECHNICAL NODE START ---")
 
-        print("INPUT NLP:", state["nlp"])
+    nlp_output = state.get("nlp", {}) or {}
+    print("INPUT NLP:", nlp_output)
 
-        output = run_technical_agent(state["nlp"])
+    tech_req = nlp_output.get("technical_requirements") or {}
+    summary = nlp_output.get("summary") or {}
+    category = summary.get("category", "unknown")
 
-        print("TECH OUTPUT:", output)
+    print("EXTRACTED TECH REQ:", tech_req)
+    print("CATEGORY:", category)
 
-        state["technical"] = output
+    ALLOWED_CATEGORIES = ["cable_supply", "electrical_fittings"]
 
-        print("--- TECHNICAL NODE END ---\n")
+    # ❌ Unsupported category
+    if category not in ALLOWED_CATEGORIES:
+        print(f"⚠️ Skipping Technical Agent → Unsupported category: {category}")
+
+        state["technical"] = {
+            "status": "skipped",
+            "reason": f"{category}_not_supported",
+            "recommended_skus": [],
+            "spec_match_scores": {},
+            "comparison_table": []
+        }
 
         return state
 
+    # ❌ No requirements
+    if not isinstance(tech_req, dict) or len(tech_req) == 0:
+        print("⚠️ No technical requirements → skipping")
+
+        state["technical"] = {
+            "status": "skipped",
+            "reason": "no_requirements_found",
+            "recommended_skus": [],
+            "spec_match_scores": {},
+            "comparison_table": []
+        }
+
+        return state
+
+    # ✅ Run agent
+    try:
+        output = run_technical_agent({
+            "technical_requirements": tech_req
+        })
+
     except Exception as e:
-        print("❌ TECHNICAL NODE ERROR:", str(e))
-        raise
+        print("❌ Technical Agent crashed:", str(e))
+
+        state["technical"] = {
+            "status": "failed",
+            "reason": str(e),
+            "recommended_skus": [],
+            "spec_match_scores": {},
+            "comparison_table": []
+        }
+
+        return state
+
+    if not output:
+        state["technical"] = {
+            "status": "failed",
+            "reason": "empty_output",
+            "recommended_skus": [],
+            "spec_match_scores": {},
+            "comparison_table": []
+        }
+        return state
+
+    print("TECH OUTPUT:", output)
+
+    state["technical"] = output
+
+    print("--- TECHNICAL NODE END ---\n")
+    return state
 
 
 # ----------------------------
-# PRICING NODE (BHARGAV)
+# PRICING NODE
 # ----------------------------
 def pricing_node(state):
-    try:
-        print("\n--- PRICING NODE START ---")
+    print("\n--- PRICING NODE START ---")
 
-        print("TECH INPUT:", state["technical"])
-        print("NLP INPUT:", state["nlp"])
+    tech = state.get("technical", {})
+    nlp = state.get("nlp", {})
 
-        pricing_agent = PricingAgent()
+    if not tech:
+        raise ValueError("❌ No Technical output for Pricing Agent")
 
-        quantities = state["nlp"].get("quantities", {})
+    pricing_agent = PricingAgent()
 
-        output = pricing_agent.run(
-            technical_output=state["technical"],
-            quantities=quantities
-        )
+    quantities = nlp.get("quantities") or {"default": 1}
 
-        print("PRICING OUTPUT:", output)
+    output = pricing_agent.run(
+        technical_output=tech,
+        quantities=quantities
+    )
 
-        state["pricing"] = output
+    print("PRICING OUTPUT:", output)
 
-        print("--- PRICING NODE END ---\n")
+    state["pricing"] = output
 
-        return state
-
-    except Exception as e:
-        print("❌ PRICING NODE ERROR:", str(e))
-        raise
+    print("--- PRICING NODE END ---\n")
+    return state
 
 
 # ----------------------------
-# GRAPH BUILDER
+# GRAPH BUILDER (🔥 THIS WAS MISSING)
 # ----------------------------
 def build_rfp_graph():
 
@@ -145,28 +195,3 @@ def build_rfp_graph():
     graph.add_edge("pricing", END)
 
     return graph.compile()
-
-
-# ----------------------------
-# LOCAL TEST
-# ----------------------------
-if __name__ == "__main__":
-
-    graph = build_rfp_graph()
-
-    initial_state: RFPState = {
-        "file_path": "sample.pdf",
-        "extracted_text": """
-        RFP for electrical cable supply.
-        Deadline: 15 February 2026
-        """,
-        "sales": {},
-        "nlp": {},
-        "technical": {},
-        "pricing": {}
-    }
-
-    final_state = graph.invoke(initial_state)
-
-    print("\nFINAL STATE:\n")
-    print(final_state)

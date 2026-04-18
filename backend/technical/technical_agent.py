@@ -2,23 +2,34 @@ from backend.technical.matching.ranking import rank_skus_by_spec_match
 from backend.technical.explainability.comparison_table import build_explainability_table
 from backend.database.mongo_client import get_all_products
 
-class TechnicalAgent:
-    """
-    Technical Agent responsible for:
-    - Evaluating OEM SKUs against RFP technical requirements
-    - Computing Spec Match %
-    - Producing explainable compliance tables
-    """
 
+# --------------------------------------------------
+# HELPERS
+# --------------------------------------------------
+
+def normalize_rfp_specs(rfp_input):
+    """
+    Converts:
+    [{"parameter": "voltage_kv", "value": 2}]
+    → {"voltage_kv": 2}
+    """
+    if isinstance(rfp_input, list):
+        return {item["parameter"]: item["value"] for item in rfp_input}
+    return rfp_input
+
+
+# --------------------------------------------------
+# TECHNICAL AGENT
+# --------------------------------------------------
+
+class TechnicalAgent:
     def __init__(self, top_k: int = 3):
         self.top_k = top_k
 
     def evaluate(self, rfp_spec: dict, skus: list) -> list:
-        """
-        Run technical evaluation for a given RFP.
 
-        Returns a list of Top-K SKU evaluation results.
-        """
+        # 🔥 FIX 1: Normalize input
+        rfp_spec = normalize_rfp_specs(rfp_spec)
 
         ranked_skus = rank_skus_by_spec_match(
             rfp_spec=rfp_spec,
@@ -26,13 +37,21 @@ class TechnicalAgent:
             top_k=self.top_k
         )
 
-        # Attach explainability tables
-        for result in ranked_skus:
-            result["compliance_table"] = build_explainability_table(
-                result["explanation"]
-            )
+        final_results = []
 
-        return ranked_skus
+        for result in ranked_skus:
+            table_df = build_explainability_table(result["explanation"])
+
+            final_results.append({
+                "sku_id": result["sku_id"],
+                "match_percent": result["spec_match_percent"],
+                "price": result.get("price"),
+
+                # JSON-safe table
+                "comparison_table": table_df.to_dict(orient="records")
+            })
+
+        return final_results
 
 
 # --------------------------------------------------
@@ -40,50 +59,31 @@ class TechnicalAgent:
 # --------------------------------------------------
 
 def run_technical_agent(rfp_data: dict) -> dict:
-    """
-    Entry point used by the orchestrator.
 
-    Input:
-        rfp_data (from parser)
-
-    Output:
-        JSON-safe technical evaluation results
-    """
-
-    # ---------------- EXTRACT RFP REQUIREMENTS ----------------
+    # ---------------- EXTRACT ----------------
     tech_req = rfp_data.get("technical_requirements", {})
 
-    rfp_spec = tech_req
-
-    # ---------------- FETCH REAL SKUs ----------------
+    # ---------------- FETCH PRODUCTS ----------------
     skus = get_all_products()
+
+    # 🔥 SAFETY: Ensure schema consistency
+    cleaned_skus = []
+    for sku in skus:
+        cleaned_skus.append({
+            "sku_id": sku.get("sku_id"),
+            "specs": sku.get("specs", {}),
+            "price": sku.get("price")
+        })
 
     # ---------------- RUN AGENT ----------------
     agent = TechnicalAgent(top_k=3)
 
     results = agent.evaluate(
-        rfp_spec=rfp_spec,
-        skus=skus
+        rfp_spec=tech_req,
+        skus=cleaned_skus
     )
 
-    # ---------------- FORMAT OUTPUT ----------------
-    recommended = []
-    scores = {}
-    comparison_tables = []
-
-    for r in results:
-        sku_id = r["sku_id"]
-
-        recommended.append(sku_id)
-        scores[sku_id] = r["spec_match_percent"]
-
-        comparison_tables.append({
-            "sku_id": sku_id,
-            "table": r["compliance_table"].to_dict(orient="records")
-        })
-
+    # ---------------- FINAL OUTPUT ----------------
     return {
-        "recommended_skus": recommended,
-        "spec_match_scores": scores,
-        "comparison_table": comparison_tables
+        "technical_evaluation": results
     }

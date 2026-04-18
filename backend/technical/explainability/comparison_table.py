@@ -10,37 +10,34 @@ def build_explainability_table(explanation: dict) -> pd.DataFrame:
     if not explanation:
         return pd.DataFrame()
 
-    # --------------------------------------------
-    # Convert dict → list of rows
-    # --------------------------------------------
     rows = []
 
     for spec, values in explanation.items():
         rows.append({
-            "spec": spec,
-            "rfp_value": values.get("rfp"),
-            "sku_value": values.get("sku"),
+            "parameter": spec,
+            "mapped_to": values.get("mapped_to"),
+
+            # 🔥 FIXED KEYS
+            "rfp_value": values.get("rfp_value"),
+            "sku_value": values.get("sku_value"),
+
+            # 🔥 HUMAN READABLE
+            "match_type": values.get("gap"),
+
+            # keep score for sorting (optional)
             "score": values.get("score")
         })
 
     df = pd.DataFrame(rows)
 
     # --------------------------------------------
-    # Add compliance status
-    # --------------------------------------------
-    def compliance_label(score):
-        if score == 1:
-            return "Compliant"
-        elif score == 0.5:
-            return "Partially Compliant"
-        else:
-            return "Non-Compliant"
-
-    df["compliance_status"] = df["score"].apply(compliance_label)
-
-    # --------------------------------------------
-    # Optional: sort by importance (score)
+    # Sort by importance
     # --------------------------------------------
     df = df.sort_values(by="score", ascending=False)
+
+    # --------------------------------------------
+    # Drop score from final UI (optional)
+    # --------------------------------------------
+    df = df.drop(columns=["score"])
 
     return df

@@ -57,7 +57,6 @@ BACKEND_URL = "http://localhost:8000/process-rfp"
 st.markdown("## ⚙️ Control Panel")
 col1, col2, col3 = st.columns(3)
 
-# -------- PRODUCT KB --------
 with col1:
     st.markdown("### 📦 Product KB")
     file = st.file_uploader("Upload Catalogue", type=["pdf"])
@@ -70,7 +69,6 @@ with col1:
         else:
             st.error(res.text)
 
-# -------- PRICING KB --------
 with col2:
     st.markdown("### 💰 Pricing KB")
     file = st.file_uploader("Upload Pricing", type=["pdf"], key="pricing")
@@ -80,7 +78,6 @@ with col2:
         res = requests.post("http://localhost:8000/upload-pricing", files=files)
         st.success(res.json())
 
-# -------- RFP --------
 with col3:
     st.markdown("### 📤 RFP Processing")
     file = st.file_uploader("Upload RFP", type=["pdf"], key="rfp")
@@ -105,8 +102,12 @@ if "rfp_result" in st.session_state:
     data = st.session_state["rfp_result"]
 
     sales = data.get("rfp_summary", {})
-    technical = data.get("technical_summary", {})
     pricing = data.get("pricing_summary", {})
+
+    # 🔥 NEW FIELDS (IMPORTANT)
+    skus = data.get("top_sku_recommendations", [])
+    scores = data.get("spec_match_scores", {})
+    decision_table = data.get("decision_table", [])
 
     total_cost = pricing.get("total_estimated_cost", 0) or 0
 
@@ -123,27 +124,22 @@ if "rfp_result" in st.session_state:
     pricing_details = pricing.get("pricing_details", [])
     df_price = pd.DataFrame(pricing_details)
 
-    if not df_price.empty and "total_price" in df_price.columns:
+    if not df_price.empty:
         df_price = df_price[["sku_id", "total_price"]]
         df_price = df_price.set_index("sku_id")
         st.bar_chart(df_price)
-
     else:
         st.info("No pricing data available")
 
-    # ---------------- SKU CHART ----------------
-    st.markdown("### 🛠 SKU Recommendations")
-
-    skus = technical.get("recommended_skus", [])
+    # ---------------- SKU RECOMMENDATIONS ----------------
+    st.markdown("### 🛠 Top SKU Recommendations")
 
     if skus:
-        df_sku = pd.DataFrame({"SKU": skus})
-        chart_data = df_sku["SKU"].value_counts().reset_index()
-        chart_data.columns = ["SKU", "Count"]
-
-        st.bar_chart(chart_data.set_index("SKU"))
+        for sku in skus:
+            score = scores.get(sku, 0)
+            st.write(f"✅ {sku} — {score}% match")
     else:
-        st.info("No SKUs recommended")
+        st.warning("No SKUs recommended")
 
 # ===============================
 # DETAILS
@@ -155,18 +151,32 @@ if "rfp_result" in st.session_state:
 
     data = st.session_state["rfp_result"]
 
+    decision_table = data.get("decision_table", [])
+    pricing_data = data.get("pricing_summary", {}).get("pricing_details", [])
+
     tab1, tab2, tab3 = st.tabs(["Overview", "Technical", "Pricing"])
 
+    # -------- OVERVIEW --------
     with tab1:
         st.json(data.get("rfp_summary", {}))
 
+    # -------- TECHNICAL --------
     with tab2:
-        tech = data.get("technical_summary", {}).get("recommended_skus", [])
-        st.dataframe(pd.DataFrame({"SKU": tech}))
+        if decision_table:
+            for sku_block in decision_table:
+                st.markdown(f"### 🔹 {sku_block['sku_id']} ({sku_block['match_percent']}%)")
+                df = pd.DataFrame(sku_block["table"])
+                st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("No technical comparison available")
 
+    # -------- PRICING --------
     with tab3:
-        pricing_data = data.get("pricing_summary", {}).get("pricing_details", [])
-        st.dataframe(pd.DataFrame(pricing_data))
+        if pricing_data:
+            df = pd.DataFrame(pricing_data)
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("No pricing data available")
 
 # -------------------------------
 # FOOTER

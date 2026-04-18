@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List
+from typing import List
 
 
 # -------------------------------
@@ -9,22 +9,24 @@ from typing import Dict, List
 def normalize_insulation(text: str) -> str:
     text = text.upper()
 
-    if "FRLS" in text:
-        return "FRLS"
-    if "XLPE" in text:
-        return "XLPE"
-    if "PVC" in text:
-        return "PVC"
-    if "HDPE" in text:
-        return "HDPE"
+    for key in ["FRLS", "XLPE", "PVC", "HDPE"]:
+        if key in text:
+            return key
 
     return None
 
 
-def normalize_voltage(text: str) -> int:
-    match = re.search(r'(\d+\.?\d*)\s*kV', text, re.IGNORECASE)
-    if match:
-        return int(float(match.group(1)))
+def normalize_voltage(text: str):
+    # kV
+    match_kv = re.search(r'(\d+\.?\d*)\s*kV', text, re.IGNORECASE)
+    if match_kv:
+        return float(match_kv.group(1))
+
+    # V (convert to kV)
+    match_v = re.search(r'(\d+)\s*V', text, re.IGNORECASE)
+    if match_v:
+        return round(int(match_v.group(1)) / 1000, 2)
+
     return None
 
 
@@ -35,31 +37,85 @@ def normalize_standard(text: str) -> str:
     return None
 
 
+def normalize_cores(text: str):
+    match = re.search(r'(\d+)\s*core', text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def normalize_conductor(text: str):
+    match = re.search(r'(\d+/\d+\.?\d*)\s*mm', text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
+def normalize_cross_section(text: str):
+    match = re.search(r'(\d+(\.\d+)?)\s*(sq\.?mm|mm2)', text, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def normalize_current(text: str):
+    match = re.search(r'(\d+)\s*A', text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 # -------------------------------
-# CORE EXTRACTION (STRUCTURED ONLY)
+# CORE EXTRACTION
 # -------------------------------
 
-def extract_structured_requirements(chunks: List[str]) -> Dict:
-    """
-    Converts raw chunks → structured schema (STRICT FORMAT)
-    """
+def extract_structured_requirements(chunks: List[str]) -> List[dict]:
 
-    result = {
-        "voltage_kv": None,
-        "insulation_type": None,
-        "standard": None
-    }
+    result = []
+    combined_text = " ".join(chunks)
 
-    for chunk in chunks:
+    voltage = normalize_voltage(combined_text)
+    insulation = normalize_insulation(combined_text)
+    standard = normalize_standard(combined_text)
+    cores = normalize_cores(combined_text)
+    conductor = normalize_conductor(combined_text)
+    cross_section = normalize_cross_section(combined_text)
+    current = normalize_current(combined_text)
 
-        if not result["voltage_kv"]:
-            result["voltage_kv"] = normalize_voltage(chunk)
+    # ---------------- CABLE SPECS ----------------
+    if voltage:
+        result.append({"parameter": "voltage_kv", "value": voltage})
 
-        if not result["insulation_type"]:
-            result["insulation_type"] = normalize_insulation(chunk)
+    if insulation:
+        result.append({"parameter": "insulation_type", "value": insulation})
 
-        if not result["standard"]:
-            result["standard"] = normalize_standard(chunk)
+    if standard:
+        result.append({"parameter": "standard", "value": standard})
+
+    if cores:
+        result.append({"parameter": "cores", "value": cores})
+
+    if conductor:
+        result.append({"parameter": "conductor", "value": conductor})
+
+    if cross_section:
+        result.append({"parameter": "cross_section_mm2", "value": cross_section})
+
+    # ---------------- ELECTRICAL FITTINGS ----------------
+    if current:
+        result.append({"parameter": "current_rating", "value": current})
+
+    # Detect type (basic)
+    text_lower = combined_text.lower()
+
+    if "switch" in text_lower:
+        result.append({"parameter": "fitting_type", "value": "switch"})
+
+    elif "socket" in text_lower:
+        result.append({"parameter": "fitting_type", "value": "socket"})
+
+    elif "mcb" in text_lower:
+        result.append({"parameter": "fitting_type", "value": "mcb"})
 
     return result
 
@@ -68,11 +124,11 @@ def extract_structured_requirements(chunks: List[str]) -> Dict:
 # QUANTITY EXTRACTION
 # -------------------------------
 
-def extract_quantities(chunks: List[str]) -> Dict:
+def extract_quantities(chunks: List[str]) -> dict:
     quantity = None
 
     for chunk in chunks:
-        match = re.search(r'(\d+)\s*(km|KM|mtr|meters)', chunk)
+        match = re.search(r'(\d+)\s*(km|KM|mtr|meters|nos|units)', chunk)
         if match:
             quantity = int(match.group(1))
             break
@@ -102,28 +158,3 @@ def extract_testing_requirements(chunks: List[str]) -> List[str]:
             tests.add("acceptance_test")
 
     return sorted(list(tests))
-
-
-# -------------------------------
-# TEST BLOCK (IMPORTANT)
-# -------------------------------
-if __name__ == "__main__":
-
-    sample_chunks = [
-        "25 core copper cable with HDPE insulation rated for 3 KV as per IS 8130 standard",
-        "Pre-delivery inspection and high voltage test required",
-        "Quantity: 11 Km"
-    ]
-
-    tech = extract_structured_requirements(sample_chunks)
-    qty = extract_quantities(sample_chunks)
-    tests = extract_testing_requirements(sample_chunks)
-
-    import json
-
-    print("\n=== STRUCTURED OUTPUT ===\n")
-    print(json.dumps({
-        "key_requirements": tech,
-        "quantities": qty,
-        "testing_requirements": tests
-    }, indent=4))
