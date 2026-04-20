@@ -1,121 +1,379 @@
 from backend.database.mongo_client import db
+from backend.technical.matching.spec_mapper import map_rfp_to_product
 
 
+# --------------------------------------------------
+# CLEAN HELPER
+# --------------------------------------------------
+def clean_value(val):
+    if isinstance(val, str):
+        return val.replace("\n", "").strip()
+    return val
+
+
+def suggest_sizes(voltage, sku_objects):
+    if not voltage:
+        return []
+
+    sizes = sorted(list(set([
+        sku.get("specs", {}).get("cross_section_mm2")
+        for sku in sku_objects
+    ])))
+
+    if voltage >= 200:
+        target = [95, 120, 150]
+    elif voltage >= 100:
+        target = [70, 95]
+    else:
+        target = []
+
+    suggestions = []
+
+    for t in target:
+        for sku in sku_objects:
+            if sku.get("specs", {}).get("cross_section_mm2") == t:
+                suggestions.append({
+                    "sku_id": sku.get("sku_id"),
+                    "sku_config_id": sku.get("sku_config_id")
+                })
+
+    return suggestions
+
+
+# --------------------------------------------------
+# 🔥 HARD CONSTRAINT CHECK
+# --------------------------------------------------
+REQUIRED_CRITICAL = ["cross_section_mm2"]
+
+
+def check_missing_critical(mapped_rfp):
+    missing = []
+
+    for param in REQUIRED_CRITICAL:
+        if param not in mapped_rfp:
+            missing.append(param)
+
+    return missing
+
+
+# --------------------------------------------------
+# PARAM WEIGHTS
+# --------------------------------------------------
+PARAM_WEIGHTS = {
+    "cross_section_mm2": 3.0,
+    "current_air": 2.0,
+    "voltage_kv": 2.0,
+    "cores": 1.5,
+    "insulation_type": 1.5,
+    "flame_type": 1.0,
+    "armour_type": 1.0,
+    "conductor": 1.5,
+    "standard": 1.0
+}
+
+
+# --------------------------------------------------
+# MATCH FUNCTION
+# --------------------------------------------------
+def match_values(param, rfp_val, sku_val):
+
+    if sku_val is None or sku_val == "UNKNOWN":
+        return "Missing", 0
+
+    # STRICT SIZE MATCH
+    if param == "cross_section_mm2":
+        return ("Exact", 1) if float(rfp_val) == float(sku_val) else ("Mismatch", 0)
+
+    # NUMERIC MATCH
+    if isinstance(rfp_val, (int, float)) and isinstance(sku_val, (int, float)):
+
+        if sku_val >= rfp_val:
+            return "Suitable", 1
+        elif abs(sku_val - rfp_val) <= (0.15 * rfp_val):
+            return "Approx", 0.5
+        else:
+            return "Undersized", 0
+
+    # STRING MATCH
+    rfp_val = str(rfp_val).lower()
+    sku_val = str(sku_val).lower()
+
+    if sku_val == rfp_val:
+        return "Exact", 1
+
+    # strict for critical fields
+    if param in ["insulation_type", "conductor", "standard"]:
+        return "Mismatch", 0
+
+    if rfp_val in sku_val or sku_val in rfp_val:
+        return "Partial", 0.5
+
+    return "Mismatch", 0
+
+
+# --------------------------------------------------
+# MAIN TECHNICAL AGENT
+# --------------------------------------------------
 def run_technical_agent(nlp_output: dict) -> dict:
-    """
-    Core Technical Engine
-
-    Supports BOTH formats:
-    1. Dict:
-        {"voltage_kv": 2, "insulation_type": "FRLS"}
-
-    2. List:
-        [{"parameter": "voltage_kv", "value": 2}]
-    """
 
     raw_requirements = nlp_output.get("technical_requirements", {})
+    requirements_list = nlp_output.get("requirements_list", [])
 
-    # --------------------------------------------------
-    # 🔥 NORMALIZE INPUT → DICT FORMAT
-    # --------------------------------------------------
-    if isinstance(raw_requirements, dict):
-        rfp_spec = raw_requirements
+    if not requirements_list:
+        if isinstance(raw_requirements, dict) and raw_requirements:
+            requirements_list = [
+                {"type": "generic", "use_case": "", "specs": raw_requirements}
+            ]
 
-    elif isinstance(raw_requirements, list):
-        rfp_spec = {
-            item["parameter"]: item["value"]
-            for item in raw_requirements
-            if isinstance(item, dict) and "parameter" in item
-        }
-
-    else:
-        rfp_spec = {}
-
-    # 🚫 No usable requirements
-    if not rfp_spec:
-        return {
-            "recommended_skus": [],
-            "spec_match_scores": {},
-            "comparison_table": []
-        }
-
-    # --------------------------------------------------
-    # FETCH SKUs
-    # --------------------------------------------------
     sku_objects = list(db["products"].find({}))
 
     if not sku_objects:
-        return {
-            "recommended_skus": [],
-            "spec_match_scores": {},
-            "comparison_table": []
-        }
+        return {"requirements_mapping": []}
 
-    results = []
+    final_results = []
 
-    # --------------------------------------------------
-    # MATCHING LOGIC
-    # --------------------------------------------------
-    for sku in sku_objects:
+    for req in requirements_list:
 
-        sku_id = sku.get("sku_id")
-        specs = sku.get("specs", {})
+        raw_rfp_spec = req.get("specs", {})
+        use_case = req.get("use_case", "").lower()
 
-        total = len(rfp_spec)
-        score = 0
-        row_table = []
+        if not raw_rfp_spec:
+            continue
 
-        for param, value in rfp_spec.items():
+        mapped_rfp = map_rfp_to_product(raw_rfp_spec)
 
-            sku_value = specs.get(param)
+        def fails_hard_constraints(mapped_rfp, sku_specs):
 
-            # ---------------- MATCH LOGIC ----------------
-            if sku_value is None:
-                match = "Missing"
-                points = 0
+            # SIZE (mandatory)
+            rfp_size = mapped_rfp.get("cross_section_mm2", {}).get("value")
+            if rfp_size is not None:
+                if sku_specs.get("cross_section_mm2") != rfp_size:
+                    return True
 
-            elif str(sku_value).lower() == str(value).lower():
-                match = "Exact"
-                points = 1
+            # CORES
+            rfp_cores = mapped_rfp.get("cores", {}).get("value")
+            if rfp_cores is not None:
+                if sku_specs.get("cores") != rfp_cores:
+                    return True
 
-            else:
-                # simple partial logic
-                if str(value).lower() in str(sku_value).lower():
-                    match = "Partial"
-                    points = 0.5
-                else:
-                    match = "Mismatch"
-                    points = 0
+            # CONDUCTOR
+            rfp_conductor = mapped_rfp.get("conductor", {}).get("value")
+            if rfp_conductor:
+                if sku_specs.get("conductor") != rfp_conductor:
+                    return True
 
-            score += points
+            # INSULATION (NEW)
+            rfp_insulation = mapped_rfp.get("insulation_type", {}).get("value")
+            if rfp_insulation:
+                if sku_specs.get("insulation_type") != rfp_insulation:
+                    return True
 
-            row_table.append({
-                "parameter": param,
-                "rfp_value": value,
-                "sku_value": sku_value if sku_value is not None else "Not Available",
-                "match": match
+            # VOLTAGE (NEW)
+            rfp_voltage = mapped_rfp.get("voltage_kv", {}).get("value")
+            sku_voltage = sku_specs.get("voltage_kv")
+
+            if rfp_voltage and sku_voltage:
+                if sku_voltage < rfp_voltage:
+                    return True
+
+            return False
+
+        print("🔥 MAPPED RFP:", mapped_rfp)
+
+        # --------------------------------------------------
+        # 🚨 STEP 1: CRITICAL VALIDATION (NEW FIX)
+        # --------------------------------------------------
+        missing = check_missing_critical(mapped_rfp)
+
+        if missing:
+            voltage = mapped_rfp.get("voltage_kv", {}).get("value")
+
+            voltage_suggestions = suggest_sizes(voltage, sku_objects)
+
+            # 🔥 SAFE: compute max size ONLY if DB exists
+            max_size = 0
+
+            try:
+                max_size = max([
+                    sku.get("specs", {}).get("cross_section_mm2", 0)
+                    for sku in sku_objects
+                ]) if sku_objects else 0
+            except:
+                max_size = 0
+
+            return {
+                "status": "missing_specs",
+
+                "requirements_mapping": [],
+                "recommended_skus": voltage_suggestions,
+                "spec_match_scores": {},
+
+                "error": f"Missing critical specs: {missing}",
+
+                # ✅ FIXED ANALYSIS
+                "analysis": {
+                    "required_size": None,
+                    "max_available_size": max_size,
+                    "gap_ratio": None,
+                    "insight": "Cannot determine feasibility without cable size"
+                },
+
+                "suggested_skus": voltage_suggestions,
+                "recommendation": "Please specify cable size (sqmm) for accurate matching"
+            }
+
+
+        # --------------------------------------------------
+        # 🚨 STEP 2: NORMAL MATCHING
+        # --------------------------------------------------
+        results = []
+        seen_configs = set()
+
+        for sku in sku_objects:
+
+            sku_config_id = sku.get("sku_config_id")
+            specs = sku.get("specs", {})
+            description = sku.get("sku_name", "").lower()
+
+            if fails_hard_constraints(mapped_rfp, specs):
+                continue  # 🚨 CRITICAL FIX
+
+            score = 0
+            total_weight = 0
+            row_table = []
+
+            for param, meta in mapped_rfp.items():
+
+                rfp_value = clean_value(meta["value"])
+                sku_value = clean_value(specs.get(param, "UNKNOWN"))
+
+                if rfp_value is None:
+                    continue
+
+                weight = PARAM_WEIGHTS.get(param, 1)
+
+                match, points = match_values(param, rfp_value, sku_value)
+
+                weighted_score = points * weight
+
+                score += weighted_score
+                total_weight += weight
+
+                row_table.append({
+                    "parameter": meta["source"],
+                    "mapped_to": param,
+                    "rfp_value": rfp_value,
+                    "sku_value": sku_value,
+                    "match": match,
+                    "weight": weight,
+                    "score": round(weighted_score, 2)
+                })
+
+            if use_case and use_case in description:
+                score += 1
+
+            match_percent = round((score / total_weight) * 100, 2) if total_weight > 0 else 0
+            if match_percent < 50:
+                continue
+
+            config_id = sku.get("sku_config_id")
+
+            if config_id in seen_configs:
+                continue
+
+            seen_configs.add(config_id)
+
+            results.append({
+                "sku_id": sku.get("sku_id"),
+                "sku_config_id": config_id,
+                "match_percent": match_percent,
+                "table": row_table
             })
 
-        # Avoid division by zero
-        match_percent = round((score / total) * 100, 2) if total > 0 else 0
+        # --------------------------------------------------
+        # 🚨 STEP 3: NO MATCH CASE
+        # --------------------------------------------------
+        if not results:
+            return build_intelligent_response(mapped_rfp, sku_objects)
 
-        results.append({
-            "sku_id": sku_id,
-            "match_percent": match_percent,
-            "table": row_table
+        results = sorted(
+            results,
+            key=lambda x: (x["match_percent"], x.get("sku_config_id")),
+            reverse=True
+        )
+
+        final_results.append({
+            "requirement": req,
+            "matched_skus": results,
+            "top_matches": results[:5]
         })
 
-    # --------------------------------------------------
-    # RANKING
-    # --------------------------------------------------
-    results = sorted(results, key=lambda x: x["match_percent"], reverse=True)
+    return {
+        "status": "success",
+        "requirements_mapping": final_results
+    }
 
-    top3 = results[:3]
+def build_intelligent_response(mapped_rfp, sku_objects):
+
+    required_size = mapped_rfp.get("cross_section_mm2", {}).get("value")
+    voltage = mapped_rfp.get("voltage_kv", {}).get("value")
+
+    all_sizes = [
+        sku.get("specs", {}).get("cross_section_mm2", 0)
+        for sku in sku_objects
+        if sku.get("specs")
+    ]
+
+    max_size = max(all_sizes) if all_sizes else None
+
+    # ---------------- SUGGEST CLOSEST ----------------
+    sorted_skus = sorted(
+        sku_objects,
+        key=lambda x: (
+            - (x.get("specs", {}).get("cross_section_mm2", 0) or 0)
+        )
+    )
+
+    seen = set()
+    suggestions = []
+
+    voltage_suggestions = suggest_sizes(voltage, sku_objects)
+
+    for sku in sorted_skus:
+        sid = sku.get("sku_config_id")
+
+        if sid in seen:
+            continue
+
+        seen.add(sid)
+
+        suggestions.append({
+            "sku_id": sku.get("sku_id"),
+            "sku_config_id": sku.get("sku_config_id"),
+            "size": sku.get("specs", {}).get("cross_section_mm2")
+        })
+
+        if len(suggestions) >= 3:
+            break
+
+    # ---------------- ANALYSIS ----------------
+    analysis = {
+        "required_size": required_size,
+        "max_available_size": max_size,
+        "gap_ratio": round(required_size / max_size, 2) if required_size and max_size else None
+    }
 
     return {
-        "recommended_skus": [r["sku_id"] for r in top3],
-        "spec_match_scores": {
-            r["sku_id"]: r["match_percent"] for r in top3
-        },
-        "comparison_table": top3
+        "requirements_mapping": [],
+        "recommended_skus": suggestions,
+        "spec_match_scores": {},
+
+        "error": "No SKU satisfies technical constraints",
+
+        "analysis": analysis,
+
+        "suggested_skus": suggestions + voltage_suggestions,
+
+        "recommendation": "Consider custom manufacturing or parallel cable configuration",
+        "status": "no_match"
     }

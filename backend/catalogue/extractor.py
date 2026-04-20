@@ -4,6 +4,9 @@ from pdf2image import convert_from_path
 from typing import List, Dict, Any
 
 
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+
 class CatalogueExtractor:
     """
     Extracts text + tables from catalogue PDFs.

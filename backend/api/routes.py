@@ -1,24 +1,27 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 import os
+import uuid
+
 from backend.services.catalogue_service import process_catalogue
 from backend.pricing.pricing_loader import load_pricing_from_pdf
-
 from backend.agents.orchestrator import MainOrchestrator
 
 
 router = APIRouter()
 
 
-# ---------------- ORCHESTRATOR ----------------
-def get_orchestrator():
-    return MainOrchestrator()
+# --------------------------------------------------
+# ORCHESTRATOR (SINGLE INSTANCE)
+# --------------------------------------------------
+orchestrator = MainOrchestrator()
 
 
-# ---------------- MAIN API ----------------
+# --------------------------------------------------
+# MAIN RFP API
+# --------------------------------------------------
 @router.post("/process-rfp")
 async def process_rfp(file: UploadFile = File(...)):
 
-    # Validate file type
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=400,
@@ -26,32 +29,45 @@ async def process_rfp(file: UploadFile = File(...)):
         )
 
     try:
-        orchestrator = get_orchestrator()
-
         # -----------------------------
-        # Save file to disk
+        # Save file (UNIQUE NAME FIX)
         # -----------------------------
         os.makedirs("data/rfps", exist_ok=True)
 
-        file_path = f"data/rfps/{file.filename}"
+        unique_name = f"{uuid.uuid4()}_{file.filename}"
+        file_path = os.path.join("data/rfps", unique_name)
 
         with open(file_path, "wb") as f:
             f.write(await file.read())
 
         # -----------------------------
-        # Extracted text (optional for now)
-        # -----------------------------
-        extracted_text = ""
-
-        # -----------------------------
-        # Call orchestrator (CORRECT PARAMS)
+        # Run workflow
         # -----------------------------
         result = orchestrator.start_workflow(
             file_path=file_path,
-            extracted_text=extracted_text
+            extracted_text=""  # (future: pass pre-extracted text if needed)
         )
 
-        return result
+        # -----------------------------
+        # RESPONSE BUILD
+        # -----------------------------
+        return {
+            "rfp_summary": result.get("rfp_summary", {}),
+            "pricing_summary": result.get("pricing_summary", {}),
+
+            "decision_table": result.get("decision_table", []),
+
+            "top_sku_recommendations": result.get("top_sku_recommendations", []),
+
+            "spec_match_scores": result.get("spec_match_scores", {}),
+
+            # 🔥 TECHNICAL INSIGHTS
+            "status": result.get("status", "success"),
+            "error": result.get("error"),
+            "analysis": result.get("analysis"),
+            "suggested_skus": result.get("suggested_skus", []),
+            "recommendation": result.get("recommendation")
+        }
 
     except RuntimeError as e:
         raise HTTPException(
@@ -66,36 +82,57 @@ async def process_rfp(file: UploadFile = File(...)):
         )
 
 
-
-#Related to catalogue uploading
-
-
-
+# --------------------------------------------------
+# PRODUCT CATALOGUE UPLOAD
+# --------------------------------------------------
 @router.post("/upload-product-catalogue")
 async def upload_catalogue(file: UploadFile = File(...)):
 
-    file_path = f"temp_{file.filename}"
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported"
+        )
 
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
+    try:
+        file_path = f"temp_{uuid.uuid4()}_{file.filename}"
 
-    result = process_catalogue(file_path)
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
 
-    return {
-        "message": "Catalogue processed successfully",
-        "products_added": result["inserted"]
-    }
+        result = process_catalogue(file_path)
 
-#===============PRICING RELATED==================
+        return {
+            "status": "success",
+            "message": "Catalogue processed successfully",
+            "products_added": result.get("inserted", 0)
+        }
 
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Catalogue processing failed: {str(e)}"
+        )
+
+
+# --------------------------------------------------
+# PRICING UPLOAD
+# --------------------------------------------------
 @router.post("/upload-pricing")
 async def upload_pricing(file: UploadFile = File(...)):
 
-    content = await file.read()
+    try:
+        content = await file.read()
 
-    entries_added = load_pricing_from_pdf(content)
+        entries_added = load_pricing_from_pdf(content)
 
-    return {
-        "status": "success",
-        "entries_added": entries_added
-    }
+        return {
+            "status": "success",
+            "entries_added": entries_added
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pricing upload failed: {str(e)}"
+        )

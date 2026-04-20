@@ -3,6 +3,7 @@ from typing import Dict, Any
 from backend.document_intelligence.ingestion.pdf_loader import load_pdf
 from backend.document_intelligence.preprocessing.cleaner import clean_pages
 from backend.document_intelligence.sectioning.section_detector import detect_sections
+from backend.document_intelligence.extraction.ner_extractor import extract_entities
 
 from backend.document_intelligence.extraction.rule_extractor import (
     extract_structured_requirements,
@@ -75,19 +76,6 @@ def detect_category_from_text(text: str) -> str:
 
     return "general_supply"
 
-# --------------------------------------------------
-# SUMMARY
-# --------------------------------------------------
-
-def generate_summary(sections: Dict[str, str], full_text: str, tech_data: dict) -> Dict:
-
-    scope_text = sections.get("scope_of_supply") or full_text[:300]
-
-    return {
-        "scope": scope_text[:300] if scope_text else None,
-        "category": detect_category(tech_data)
-    }
-
 
 # --------------------------------------------------
 # CONVERT LIST → DICT
@@ -97,12 +85,18 @@ def convert_to_spec_dict(requirements_list):
     spec_dict = {}
 
     for item in requirements_list:
-        if isinstance(item, dict):
-            param = item.get("parameter")
-            value = item.get("value")
+        if not isinstance(item, dict):
+            continue
 
-            if param:
-                spec_dict[param] = value
+        param = item.get("parameter")
+        value = item.get("value")
+
+        if not param:
+            continue
+
+        # 🔥 DO NOT overwrite good values
+        if param not in spec_dict:
+            spec_dict[param] = value
 
     return spec_dict
 
@@ -110,6 +104,100 @@ def convert_to_spec_dict(requirements_list):
 # --------------------------------------------------
 # MAIN PARSER (ROBUST)
 # --------------------------------------------------
+
+# --------------------------------------------------
+# 🔥 VALUE CLEANING
+# --------------------------------------------------
+import re
+
+def clean_value(val, key=None):
+    if val is None:
+        return None
+
+    if isinstance(val, str):
+        val = val.replace("\n", " ").strip()
+
+        # 🔥 DO NOT TOUCH STANDARD
+        if key == "standard":
+            return val.replace(" ", "").upper()
+
+        # Numeric only for specific fields
+        if key in ["voltage_kv", "current_rating", "cross_section_mm2", "cores"]:
+            import re
+            nums = re.findall(r"\d+\.?\d*", val)
+            if nums:
+                return float(nums[0])
+            return None
+
+        return val
+
+    return val
+
+
+# --------------------------------------------------
+# 🔥 SPEC VALIDATION (CRITICAL FIX)
+# --------------------------------------------------
+
+def validate_specs(specs: dict) -> dict:
+    clean_specs = {}
+
+    for k, v in specs.items():
+
+        v = clean_value(v, k)
+
+        if v is None:
+            continue
+
+        # ---------------- DOMAIN RULES ----------------
+
+        if k == "voltage_kv":
+            if isinstance(v, (int, float)) and (v <= 0 or v > 1000):
+                continue
+
+        if k == "cores":
+            if isinstance(v, (int, float)) and (v <= 0 or v > 10):
+                continue
+
+        if k == "current_rating":
+            if isinstance(v, (int, float)) and (v <= 0 or v > 5000):
+                continue
+
+        if k == "cross_section_mm2":
+            if isinstance(v, (int, float)) and (v <= 0 or v > 3000):
+                continue
+
+        # Clean standard
+        if k == "standard" and isinstance(v, str):
+            v = v.replace(" ", "").upper()
+
+        clean_specs[k] = v
+
+    return clean_specs
+
+
+def prioritize_specs(specs: dict) -> dict:
+    """
+    Keep only high-value engineering parameters.
+    Avoid noise like weak current or bad standards.
+    """
+
+    PRIORITY_KEYS = [
+        "cross_section_mm2",
+        "voltage_kv",
+        "insulation_type",
+        "cores",
+        "conductor"
+    ]
+
+    prioritized = {}
+
+    for key in PRIORITY_KEYS:
+        if key in specs:
+            prioritized[key] = specs[key]
+
+    return prioritized
+
+
 
 def parse_rfp(file_path: str, rfp_id: str = "RFP_001") -> Dict[str, Any]:
 
@@ -126,18 +214,64 @@ def parse_rfp(file_path: str, rfp_id: str = "RFP_001") -> Dict[str, Any]:
 
     # ---------------- EXTRACTION ----------------
 
-    # Prefer section → fallback to full text
-    tech_text = sections.get("technical_specifications") or full_text
+    tech_text = sections.get("technical_specifications")
+    if not tech_text:
+        tech_text = full_text
 
     qty_text = sections.get("quantities") or full_text
     test_text = sections.get("testing_and_acceptance") or full_text
 
-    # ---------------- STRUCTURED EXTRACTION ----------------
-    raw_requirements = extract_structured_requirements([tech_text]) or []
+    # 🔥 split into meaningful chunks (line-level)
+    chunks = [c.strip() for c in tech_text.split("\n") if len(c.strip()) > 5]
+    raw_requirements = extract_structured_requirements(chunks) or []
 
+    raw_quantities = extract_quantities([qty_text]) or {}
+
+    # 🔥 Normalize quantity (meter-based default)
+    normalized_quantities = {}
+
+    for k, v in raw_quantities.items():
+        try:
+            val = float(v)
+            if val > 0:
+                normalized_quantities[k] = val
+        except:
+            continue
+
+    # fallback: if nothing extracted, assume 1
+    if not normalized_quantities:
+        normalized_quantities["default"] = 1
+
+    # Convert raw → dict
     technical_requirements = convert_to_spec_dict(raw_requirements)
 
-    # ---------------- 🔥 FALLBACK IF EMPTY ----------------
+    # 🔥 CLEAN + VALIDATE
+    technical_requirements = validate_specs(technical_requirements)
+
+    # 🔥 SOFT PRIORITIZATION
+    priority_order = [
+        "cross_section_mm2",
+        "voltage_kv",
+        "insulation_type",
+        "cores",
+        "conductor"
+    ]
+
+    technical_requirements = {
+        **{k: technical_requirements[k] for k in priority_order if k in technical_requirements},
+        **technical_requirements
+    }
+
+    # 🔥 NER ENRICHMENT (NEW)
+    ner_output = extract_entities(full_text)
+    structured_ner = ner_output.get("structured", {})
+
+    # Merge only missing fields
+    for k, v in structured_ner.items():
+        if k not in technical_requirements:
+            technical_requirements[k] = v
+
+    # 🔥 ONLY fallback if NOTHING meaningful found
     if not technical_requirements:
         print("⚠️ Structured extraction failed → using semantic fallback")
 
@@ -160,15 +294,17 @@ def parse_rfp(file_path: str, rfp_id: str = "RFP_001") -> Dict[str, Any]:
     # ---------------- DEBUG ----------------
     print("\n====== RFP PARSER DEBUG ======")
     print("RAW REQUIREMENTS:", raw_requirements)
-    print("FINAL TECH REQ:", technical_requirements)
+    print("CLEANED REQUIREMENTS:", technical_requirements)
     print("CATEGORY:", summary["category"])
     print("====== END DEBUG ======\n")
+
+    print("🔥 FINAL TECH SPECS SENT TO TECH AGENT:", technical_requirements)
 
     # ---------------- FINAL OUTPUT ----------------
     return {
         "rfp_id": rfp_id,
         "summary": summary,
         "technical_requirements": technical_requirements,
-        "quantities": extract_quantities([qty_text]) or {},
+        "quantities": normalized_quantities,
         "testing_requirements": extract_testing_requirements([test_text]) or []
     }
