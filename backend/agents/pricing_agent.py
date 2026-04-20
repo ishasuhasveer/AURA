@@ -11,11 +11,12 @@ class PricingAgent:
         # 🚨 STEP 1: BLOCK PRICING IF TECHNICAL FAILED
         # --------------------------------------------------
 
-        if technical_output.get("error"):
+        if technical_output.get("status") == "no_match":
             return {
                 "pricing_details": [],
-                "total_estimated_cost": 0,
-                "message": "No valid SKUs for pricing (technical validation failed)"
+                "total_estimated_cost": None,
+                "message": "Pricing unavailable — no valid SKU satisfies requirements",
+                "status": "no_pricing"
             }
 
         # --------------------------------------------------

@@ -293,8 +293,34 @@ def run_technical_agent(nlp_output: dict) -> dict:
         # --------------------------------------------------
         # 🚨 STEP 3: NO MATCH CASE
         # --------------------------------------------------
+        # --------------------------------------------------
+        # 🚨 STEP 3: NO MATCH CASE (FIXED)
+        # --------------------------------------------------
         if not results:
-            return build_intelligent_response(mapped_rfp, sku_objects)
+
+            response = build_intelligent_response(mapped_rfp, sku_objects)
+
+            # 🚨 CRITICAL FIX: DO NOT TREAT SUGGESTIONS AS VALID SKUs
+            response["recommended_skus"] = []  # ❌ remove misleading field
+
+            # 🔥 Rename suggestions properly (closest matches only)
+            response["closest_skus"] = response.get("suggested_skus", [])[:3]
+
+            # Optional: clean duplicates
+            seen = set()
+            unique = []
+            for s in response["closest_skus"]:
+                sid = s.get("sku_config_id")
+                if sid and sid not in seen:
+                    seen.add(sid)
+                    unique.append(s)
+
+            response["closest_skus"] = unique
+
+            # 🔥 Add label for UI clarity
+            response["note"] = "Closest matches shown below do NOT fully satisfy requirements"
+
+            return response
 
         results = sorted(
             results,

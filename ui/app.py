@@ -170,6 +170,9 @@ if "rfp_result" in st.session_state:
     if error:
         st.warning(f"⚠️ {error}")
 
+    if data.get("status") == "no_match":
+        st.error("❌ No valid product configuration satisfies this RFP")
+
     if analysis:
         st.subheader("📊 Gap Analysis")
 
@@ -182,7 +185,8 @@ if "rfp_result" in st.session_state:
         if analysis.get("insight"):
             st.warning(analysis["insight"])
 
-    if suggested:
+    # 🔥 SHOW ONLY IF VALID MATCH EXISTS
+    if data.get("status") == "success" and suggested:
         st.subheader("🤖 AI Suggested SKUs")
 
         for s in suggested:
@@ -190,6 +194,17 @@ if "rfp_result" in st.session_state:
                 st.write(f"• {s.get('sku_config_id')} (Size: {s.get('size', 'N/A')} sqmm)")
             else:
                 st.write(f"• {s}")
+
+    # 🔥 NEW: SHOW CLOSEST MATCHES (NO MATCH CASE)
+    elif data.get("status") == "no_match":
+
+        closest = data.get("closest_skus", [])
+
+        if closest:
+            st.subheader("⚠️ Closest Matches (Do NOT fully satisfy requirements)")
+
+            for s in closest:
+                st.write(f"• {s.get('sku_config_id')} (Size: {s.get('size', 'N/A')} sqmm)")
 
     if recommendation:
         st.success(f"💡 {recommendation}")
@@ -200,14 +215,17 @@ if "rfp_result" in st.session_state:
 
     skus, scores = extract_skus(data)
 
-    total_cost = pricing.get("total_estimated_cost", 0) or 0
+    total_cost = pricing.get("total_estimated_cost")
 
     # KPIs
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("RFP ID", sales.get("rfp_id", "-"))
     k2.metric("Deadline", str(sales.get("deadline", "-")))
     k3.metric("Priority", sales.get("priority", "-"))
-    k4.metric("Total Cost", f"₹ {total_cost:,.0f}")
+    if total_cost:
+        k4.metric("Total Cost", f"₹ {total_cost:,.0f}")
+    else:
+        k4.metric("Total Cost", "Not Available")
 
     # ---------------- COST CHART ----------------
     st.markdown("### 💰 Cost Breakdown")
@@ -221,14 +239,28 @@ if "rfp_result" in st.session_state:
         st.bar_chart(df_price)
         st.dataframe(df_price.reset_index(), use_container_width=True)
 
+
     else:
-        st.info("No pricing data available")
+
+        if data.get("status") == "no_match":
+
+            st.warning("Pricing unavailable — no valid SKU satisfies requirements")
+
+        else:
+
+            st.info("No pricing data available")
 
     # ---------------- SKU RECOMMENDATIONS ----------------
     st.markdown("### 🛠 Top SKU Recommendations")
 
-    if skus:
+    if data.get("status") == "success" and skus:
+        seen = set()
+
         for i, sku in enumerate(skus):
+            if sku in seen:
+                continue
+            seen.add(sku)
+
             score = round(scores.get(sku, 0), 2) if scores else 0
 
             st.markdown(f"""
